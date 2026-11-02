@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Статистика волейбола</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="min-h-dvh">
+  <!-- Единственная «атмосфера» на странице — мягкое коралловое свечение сверху -->
+  <div aria-hidden="true" class="pointer-events-none fixed inset-x-0 top-0 h-96 bg-[radial-gradient(55%_90%_at_50%_0%,rgb(255_99_99/0.13),transparent_70%)]"></div>
+
+  <main class="relative mx-auto flex min-h-dvh max-w-xl flex-col px-4 pt-8 pb-6">
+    <header class="flex items-center gap-3">
+      <span class="logo"></span>
+      <span id="team" class="text-sm font-medium">Волейбол</span>
+    </header>
+
+    <h1 class="mt-14 text-[40px] leading-[1.1] font-normal tracking-[0.004em]">Статистика матча</h1>
+    <p class="mt-3 max-w-sm text-ash">Ведите счёт с телефона, а разбирайте игру на ноутбуке.</p>
+
+    <nav class="mt-10 grid gap-3" aria-label="Режимы">
+      <a href="quick.html" class="surface group flex items-center gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-key-hi)]">
+        <span class="grid size-12 shrink-0 place-items-center rounded-full bg-well text-mist">
+          <svg viewBox="0 0 24 24" class="size-5" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-lg font-medium">Быстрая статистика</span>
+          <span class="mt-0.5 block text-sm text-ash">Кто закончил розыгрыш и чем. Для игры вживую.</span>
+        </span>
+        <span class="kbd ml-auto">1</span>
+      </a>
+      <a href="detailed.html" class="surface group flex items-center gap-4 p-5 transition-shadow hover:shadow-[var(--shadow-key-hi)]">
+        <span class="grid size-12 shrink-0 place-items-center rounded-full bg-well text-mist">
+          <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-lg font-medium">Детальная статистика</span>
+          <span class="mt-0.5 block text-sm text-ash">Каждое касание: приём, защита, атака. Для разбора по видео.</span>
+        </span>
+        <span class="kbd ml-auto">2</span>
+      </a>
+    </nav>
+
+    <div class="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <a href="detailed.html#settings" class="btn btn-sm justify-start">Настройки и QR</a>
+      <a href="quick-stats.html" class="btn btn-sm justify-start">Дашборд: быстрая</a>
+      <a href="stats.html" class="btn btn-sm justify-start">Дашборд: детальная</a>
+    </div>
+
+    <footer id="meta" class="meta mt-auto pt-12"></footer>
+  </main>
+
+  <script type="module">
+    // Название команды и адреса для телефона — чтобы не лезть в настройки.
+    fetch('/api/settings').then(r => r.json()).then(s => { document.getElementById('team').textContent = s.teamName; }).catch(() => {});
+    fetch('/api/qr').then(r => r.json()).then(q => {
+      const phone = q.urls[0] ? `телефон: ${q.urls[0].replace(/^http:\/\/|\/$/g, '')}` : 'нет сети для телефона';
+      document.getElementById('meta').textContent = `${location.host} | ${phone}`;
+    }).catch(() => {});
+    // 1 и 2 на клавиатуре открывают режимы.
+    addEventListener('keydown', e => {
+      if (e.code === 'Digit1') location.href = 'quick.html';
+      if (e.code === 'Digit2') location.href = 'detailed.html';
+    });
+  </script>
+</body>
+</html>

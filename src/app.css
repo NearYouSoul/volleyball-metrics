@@ -1,0 +1,218 @@
+/* Исходник стилей. Собирается в public/app.css командой `npm run build:css`.
+   Готовый public/app.css лежит в проекте, поэтому на турнире интернет и сборка не нужны. */
+@import "tailwindcss";
+@source "../public";
+
+/* Шрифты лежат локально в public/fonts — сайт работает без интернета. */
+@font-face { font-family: "Inter"; font-weight: 100 900; font-display: swap; src: url("fonts/inter-latin-wght-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+2000-206F, U+20AC, U+2122, U+2190-21FF, U+2212; }
+@font-face { font-family: "Inter"; font-weight: 100 900; font-display: swap; src: url("fonts/inter-cyrillic-wght-normal.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Geist Mono"; font-weight: 400; font-display: swap; src: url("fonts/geist-mono-latin-400-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+2000-206F, U+2190-21FF; }
+@font-face { font-family: "Geist Mono"; font-weight: 400; font-display: swap; src: url("fonts/geist-mono-cyrillic-400-normal.woff2") format("woff2"); unicode-range: U+0400-045F; }
+@font-face { font-family: "Geist Mono"; font-weight: 500; font-display: swap; src: url("fonts/geist-mono-latin-500-normal.woff2") format("woff2"); unicode-range: U+0000-00FF, U+2000-206F, U+2190-21FF; }
+@font-face { font-family: "Geist Mono"; font-weight: 500; font-display: swap; src: url("fonts/geist-mono-cyrillic-500-normal.woff2") format("woff2"); unicode-range: U+0400-045F; }
+
+/* Токены по мотивам Raycast: почти чёрный холст, ступени поверхностей, один тёплый коралл. */
+@theme {
+  --color-canvas: #040506;   /* фон страницы */
+  --color-card: #07080a;     /* карточки и панели */
+  --color-well: #111214;     /* углубления: поля ввода, плитки */
+  --color-raise: #1b1c1e;    /* нейтральные кнопки */
+  --color-line: #363739;     /* волосяные линии */
+  --color-ash: #9c9c9d;      /* вторичный текст */
+  --color-smoke: #6a6b6c;    /* приглушённый текст */
+  --color-mist: #e6e6e6;     /* главная кнопка — нейтральная, не цветная */
+  --color-iron: #454647;     /* текст на главной кнопке */
+  --color-coral: #ff6363;    /* фирменный знак и «очко им» */
+  --color-ember: #452324;    /* тёплая подложка под кораллом */
+  --color-mint: #59d499;     /* «очко нам» */
+  --color-sky: #63a1ff;      /* второй цвет в графиках */
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, Consolas, monospace;
+
+  /* «Клавиша»: светлая кромка сверху, тонкое кольцо, тень снизу внутри — поверхность нажимается, а не парит */
+  --shadow-key: inset 0 1px 0 0 rgb(255 255 255 / 0.05), 0 0 0 1px rgb(255 255 255 / 0.08), inset 0 -1px 0 0 rgb(0 0 0 / 0.2);
+  --shadow-key-hi: inset 0 1px 0 0 rgb(255 255 255 / 0.1), 0 0 0 1px rgb(255 255 255 / 0.16), inset 0 -1px 0 0 rgb(0 0 0 / 0.25);
+  --shadow-lift: 0 7px 3px 0 rgb(0 0 0 / 0.03), 0 4px 4px 0 rgb(0 0 0 / 0.25);
+  --shadow-sheet: 0 -24px 48px rgb(0 0 0 / 0.6), inset 0 1px 0 0 rgb(255 255 255 / 0.08);
+}
+
+@layer base {
+  html { background: var(--color-canvas); color-scheme: dark; }
+  body {
+    @apply bg-canvas text-white font-sans antialiased;
+    font-feature-settings: "calt", "kern", "liga", "ss03";
+    -webkit-tap-highlight-color: transparent;
+  }
+  :focus-visible { outline: 2px solid var(--color-mist); outline-offset: 2px; }
+  ::selection { background: var(--color-ember); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+}
+
+@layer components {
+  /* Кнопки: по умолчанию тёмная «клавиша»; главная — светлая нейтральная */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-raise px-4 min-h-11 text-[15px] font-medium text-white select-none cursor-pointer transition-[transform,background-color] duration-75;
+    box-shadow: var(--shadow-key);
+  }
+  .btn:hover { box-shadow: var(--shadow-key-hi); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { @apply opacity-35 pointer-events-none; }
+  .btn-primary { @apply bg-mist text-iron; box-shadow: var(--shadow-lift); }
+  .btn-primary:hover { @apply bg-white; box-shadow: var(--shadow-lift); }
+  .btn-ghost { @apply bg-transparent text-ash hover:text-white; box-shadow: none; }
+  .btn-ghost:hover { box-shadow: none; }
+  .btn-sm { @apply min-h-9 px-3 text-[13px]; }
+  .btn-us { background: rgb(89 212 153 / 0.09); @apply text-mint; }
+  .btn-them { background: rgb(255 99 99 / 0.09); @apply text-coral; }
+
+  .surface { @apply bg-card rounded-2xl; box-shadow: var(--shadow-key); }
+  .field { @apply w-full rounded-lg bg-white/5 px-3 py-3 text-base text-white placeholder:text-ash outline-none focus:bg-white/8; }
+
+  /* Подсказка клавиши — только там, где есть мышь и клавиатура */
+  .kbd { @apply hidden pointer-fine:inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-[5px] font-mono text-[11px] font-medium text-smoke; box-shadow: 0 0 0 1px var(--color-line); }
+  .btn-us .kbd { color: rgb(89 212 153 / 0.6); box-shadow: 0 0 0 1px rgb(89 212 153 / 0.25); }
+  .btn-them .kbd { color: rgb(255 99 99 / 0.6); box-shadow: 0 0 0 1px rgb(255 99 99 / 0.25); }
+
+  /* Фирменный знак: коралловый ромб */
+  .logo { @apply inline-block size-3 rotate-45 rounded-[3px] bg-coral; box-shadow: 0 0 16px rgb(255 99 99 / 0.55); }
+
+  .meta { @apply font-mono text-xs text-smoke; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* Таблицы дашборда */
+  .table { @apply w-full border-collapse text-sm tabular-nums; }
+  .table th { @apply px-3 py-2.5 text-left text-xs font-medium text-ash align-bottom; }
+  .table td { @apply px-3 py-2.5 border-t border-white/5; }
+  .table tfoot td { @apply border-t border-line font-semibold; }
+}
+
+/* ===== Детальный режим: его разметка осталась прежней, здесь только новый внешний вид ===== */
+.detailed {
+  --bg: var(--color-canvas); --card: var(--color-card); --line: var(--color-line); --text: #fff; --muted: var(--color-ash);
+  --accent: var(--color-mist); --neutral: var(--color-raise);
+  --g-bg: rgb(89 212 153 / 0.09); --g-fg: var(--color-mint);
+  --y-bg: rgb(240 200 90 / 0.09); --y-fg: #f0c85a;
+  --r-bg: rgb(255 99 99 / 0.09); --r-fg: var(--color-coral);
+}
+.detailed #app { @apply mx-auto max-w-xl p-4; }
+.detailed h1 { @apply mt-1 mb-3 text-2xl font-normal tracking-[0.004em]; }
+.detailed h2 { @apply mt-6 mb-2 text-sm font-medium text-ash; }
+.detailed p.hint, .detailed .hint { @apply my-1 mb-2.5 text-sm text-smoke no-underline; }
+.detailed a.hint:hover { @apply text-white; }
+.detailed button, .detailed a.btn {
+  @apply inline-flex items-center justify-center rounded-lg bg-raise px-2.5 py-3 min-h-12 text-[15px] font-medium text-white cursor-pointer select-none no-underline transition-transform duration-75;
+  box-shadow: var(--shadow-key); font-family: inherit; border: 0;
+}
+.detailed button:active, .detailed a.btn:active { transform: translateY(1px); }
+.detailed button:disabled { @apply opacity-35; }
+.detailed button.primary, .detailed button.on { @apply bg-mist text-iron; box-shadow: var(--shadow-lift); }
+.detailed button.g, .detailed button.y, .detailed button.r, .detailed button.n { @apply font-semibold text-[17px]; }
+.detailed button.g { background: var(--g-bg); color: var(--g-fg); }
+.detailed button.y { background: var(--y-bg); color: var(--y-fg); }
+.detailed button.r { background: var(--r-bg); color: var(--r-fg); }
+.detailed input { @apply rounded-lg bg-white/5 p-2.5 text-white outline-none min-w-0; border: 0; font: inherit; }
+.detailed input[type=checkbox] { @apply size-5 accent-mist p-0; }
+.detailed .row { @apply my-2 flex gap-2; }
+.detailed .row > * { flex: 1; }
+.detailed .col { @apply flex flex-col gap-2; }
+.detailed .grid3 { @apply grid grid-cols-3 gap-2; }
+.detailed .card { @apply my-2 rounded-2xl bg-card p-3; box-shadow: var(--shadow-key); }
+.detailed .score { @apply flex items-center justify-between rounded-2xl bg-card px-4 py-2.5; box-shadow: var(--shadow-key); }
+.detailed .score .num { @apply text-5xl font-normal leading-none; }
+.detailed .score .mid { @apply text-center text-xs text-smoke; }
+.detailed .tile { @apply relative flex min-h-[72px] flex-col items-center justify-center bg-well px-1 py-2; }
+.detailed .tile .n { @apply text-[28px] font-medium leading-tight tabular-nums; }
+.detailed .tile .n.nm-big { @apply max-w-full truncate text-lg font-semibold; }
+.detailed .tile .nm { @apply max-w-full truncate text-xs text-ash; }
+.detailed .tile.on .nm { @apply text-iron; }
+.detailed .tile .ball { @apply absolute top-1 right-1.5 text-xs; }
+.detailed .tile .ord { @apply absolute top-1 left-2 text-xs font-semibold text-coral; }
+.detailed .phase { @apply mt-2 mb-1.5 flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left; }
+.detailed .phase b { @apply block text-xl font-medium; }
+.detailed .phase small { @apply mt-0.5 block text-sm font-normal text-ash; }
+.detailed .phase .flip { @apply text-xl text-ash; }
+.detailed .ph-serve, .detailed .ph-ours { background: var(--g-bg); } .detailed .ph-serve b, .detailed .ph-ours b { color: var(--g-fg); }
+.detailed .ph-rec, .detailed .ph-their { background: var(--y-bg); } .detailed .ph-rec b, .detailed .ph-their b { color: var(--y-fg); }
+.detailed .last { @apply min-h-8 px-1 py-1.5 text-base font-semibold text-smoke; }
+.detailed .last.us { color: var(--g-fg); } .detailed .last.them { color: var(--r-fg); }
+.detailed .team { @apply mb-2 grid grid-cols-2 gap-2; }
+.detailed .team button { @apply min-h-14; }
+.detailed .tools { @apply mt-3 grid grid-cols-5 gap-1.5; }
+.detailed .tools button { @apply min-h-11 px-0.5 py-2 text-xs; }
+.detailed .sheet { @apply rounded-2xl bg-card; box-shadow: var(--shadow-key-hi); }
+.detailed .sheet h3 { @apply mt-0 mb-1.5 text-lg font-medium; }
+.detailed .sheet .lbl { @apply mt-2.5 mb-1 text-xs text-smoke; }
+.detailed .sheet .acts { @apply grid grid-cols-3 gap-1.5; }
+.detailed .sheet .acts.two { @apply grid-cols-2; }
+.detailed .sheet .acts button { @apply min-h-14 px-1 py-2; }
+.detailed .sheet .acts button:only-child { grid-column: 1 / -1; }
+.detailed .log { @apply mt-3 text-[13px] text-smoke; }
+.detailed .log div { @apply border-b border-white/5 py-1; }
+.detailed .log .us { color: var(--g-fg); } .detailed .log .them { color: var(--r-fg); }
+.detailed .overlay { @apply fixed inset-0 z-10 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm; }
+.detailed .overlay .card { @apply w-full max-w-sm p-6 text-center; }
+.detailed .overlay .big { @apply my-2 mb-4 text-6xl font-normal tabular-nums; }
+.detailed .rost { @apply my-1.5 grid grid-cols-[60px_1fr_auto_44px] items-center gap-1.5; }
+.detailed .rost label { @apply flex items-center gap-1 text-xs text-ash; }
+.detailed .rost button { @apply min-h-10 p-1.5; }
+.detailed .qr { @apply text-center; }
+.detailed .qr img { @apply mx-auto block w-full max-w-[240px] rounded-xl bg-white p-2; }
+.detailed .qr code { @apply mt-2.5 block font-mono text-sm break-all text-white; }
+.detailed code { @apply font-mono text-[13px]; }
+.detailed .pos { color: var(--g-fg); } .detailed .neg { color: var(--r-fg); }
+
+/* ===== Дашборды: классы, которые строит JS ===== */
+.dash h1 { @apply mt-6 text-[32px] leading-tight font-normal tracking-[0.004em] sm:text-[40px]; }
+.dash section > h2 { @apply mt-12 mb-4 text-xl font-normal text-white; }
+.dash .topbar { @apply flex items-center justify-between; }
+.dash .filters { @apply my-5 flex flex-wrap gap-2; }
+.dash select { @apply rounded-lg bg-raise py-2.5 pr-8 pl-3 text-sm text-white outline-none; box-shadow: var(--shadow-key); border: 0; font: inherit; font-size: 14px; }
+.dash .tabs { @apply mb-2 flex flex-wrap gap-2; }
+.dash .muted { @apply text-smoke; } .dash .small { @apply text-sm; }
+.dash .pos { @apply text-mint; } .dash .neg { @apply text-coral; }
+.dash .kpis { @apply grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3; }
+.dash .kpi { @apply rounded-2xl bg-card p-5; box-shadow: var(--shadow-key); }
+.dash .kpi .t { @apply text-sm text-ash; }
+.dash .kpi .v { @apply mt-2 text-[40px] leading-none font-normal tabular-nums; }
+.dash .kpi .s { @apply mt-2 text-[13px] leading-snug text-smoke; }
+.dash .tablewrap { @apply overflow-x-auto rounded-2xl bg-card py-1; box-shadow: var(--shadow-key); }
+.dash .table th, .dash .table td { @apply text-center whitespace-nowrap; }
+.dash .table .l { @apply text-left; }
+.dash .table th.g { @apply text-mint; } .dash .table th.r { @apply text-coral; }
+.dash .table th.sort { @apply cursor-pointer whitespace-normal min-w-16 leading-tight hover:text-white; }
+.dash .table th.sort.on { @apply text-white; }
+.dash .table th.sort.on::after { content: " ↓"; }
+.dash .table td.b { @apply font-semibold; }
+.dash .table tbody tr:hover { @apply bg-white/[0.02]; }
+.dash .bar { @apply flex h-3 gap-0.5 overflow-hidden rounded-full; }
+.dash .legend { @apply mt-4 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2; }
+.dash .legend div { @apply flex items-center gap-3 rounded-xl bg-card px-4 py-3 text-sm text-ash; box-shadow: var(--shadow-key); }
+.dash .legend i { @apply size-2.5 shrink-0 rounded-full; }
+.dash .legend b { @apply ml-auto text-lg font-normal text-white tabular-nums; }
+.dash .legend span { @apply w-10 text-right text-[13px] text-smoke tabular-nums; }
+.dash .leaders { @apply grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3; }
+.dash .lead { @apply flex items-baseline justify-between gap-3 py-2; }
+.dash .lead + .lead { @apply border-t border-white/5; }
+.dash .lead b { @apply text-xl font-normal tabular-nums; }
+.dash .kpi .lead:first-of-type { @apply mt-2; }
+.dash .feed div { @apply py-1.5 text-sm font-medium; }
+.dash .card { @apply rounded-2xl bg-card p-6; box-shadow: var(--shadow-key); }
+.dash .config { @apply mt-6 max-w-3xl; }
+.dash .config h2 { @apply mb-1 text-lg font-normal text-white; }
+.dash .pair { @apply grid grid-cols-2 gap-2; }
+.dash .cfg-row { @apply flex items-center gap-2 py-2.5; }
+.dash .cfg-row + .cfg-row { @apply border-t border-white/5; }
+.dash .cfg-row label { @apply flex flex-1 cursor-pointer items-center gap-3; }
+.dash .cfg-row label b { @apply block font-medium; }
+.dash .cfg-row label small { @apply block text-[13px] text-smoke; }
+.dash .cfg-row.off b { @apply text-ash; }
+.dash .cfg-row .btn-sm { @apply w-10 px-0; }
+.dash .cfg-cols { @apply mt-3 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2; }
+.dash .cfg-cols label { @apply flex cursor-pointer items-center gap-2.5 rounded-lg bg-well px-3 py-2.5 text-sm; }
+.dash .cfg-cols label.g { @apply text-mint; } .dash .cfg-cols label.r { @apply text-coral; }
+.dash input[type=checkbox] { @apply size-[18px] shrink-0 accent-mist; }
+
+/* Закреплённый столбец с игроком: при прокрутке таблицы вправо имя остаётся на месте */
+.dash .table tr > :first-child { @apply sticky left-0 z-[1] bg-card; box-shadow: 1px 0 0 0 rgb(255 255 255 / 0.06); }
+.dash .table tfoot tr > :first-child { @apply bg-card; }
