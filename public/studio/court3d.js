@@ -454,6 +454,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   // ---------- Мышь: клик по полу ----------
   const ray = new THREE.Raycaster();
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const netPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // вертикальная плоскость сетки
   const ndc = new THREE.Vector2();
   const hover = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.26, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
   hover.rotation.x = -Math.PI / 2; hover.visible = false; scene.add(hover);
@@ -463,8 +464,16 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
-    const o = ray.intersectObjects(pickables(), false)[0]?.object;
-    return o ? (o.userData.pid ? { player: o.userData.pid } : { hands: o.userData.hands }) : null;
+    // Всё, во что попала мышь: игрок, руки блока, сетка. Что важнее — решает студия по шагу ввода.
+    const out = {};
+    for (const h of ray.intersectObjects(pickables(), false)) {
+      const o = h.object;
+      if (o.userData.pid && !out.player) out.player = o.userData.pid;
+      if (o.userData.hands && !out.hands) out.hands = o.userData.hands;
+    }
+    const q = new THREE.Vector3();
+    if (ray.ray.intersectPlane(netPlane, q) && q.y > 0.4 && q.y < NET_H + 1.4 && q.x > -5.2 && q.x < 5.2) out.net = { x: +(q.x + 4.5).toFixed(2) };
+    return out.player || out.hands || out.net ? out : null;
   };
   const pick = e => {
     const r = renderer.domElement.getBoundingClientRect();
@@ -489,8 +498,8 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   renderer.domElement.addEventListener('pointermove', e => {
     const p = pick(e);
     const hit = pickHit(e);
-    renderer.domElement.style.cursor = hit ? 'pointer' : 'crosshair';
-    hover.visible = !!p && !hit;
+    renderer.domElement.style.cursor = hit?.player || hit?.hands ? 'pointer' : 'crosshair';
+    hover.visible = !!p && !hit?.player && !hit?.hands;
     if (p) { hover.position.copy(toWorld(p)); hover.position.y = 0.014; }
     onHover?.(p && { ...p, zone: zoneOf(p) }, e, hit);
   });

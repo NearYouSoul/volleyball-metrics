@@ -5,7 +5,7 @@ import { replay, playerName, LABELS, ACTIONS, SKILLS } from '../engine.js';
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
-import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT } from '../formations.js';
+import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide } from '../formations.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -234,8 +234,15 @@ const court = createCourt3D($('court3d'), {
   onPick: (p, e, hit) => onCourtPick(p, e, hit),
   onHover: (p, e, hit) => {
     const el = $('courtHover');
+    if (hit?.net && !hit.player && !hit.hands && ctx()?.stage !== 'their') hit = null;
     ui.mouse = p;
-    const hp = hit?.player ?? null;
+    // Пока мяч у соперника, сетка важнее игроков у сетки: мышь на сетке — предпросмотр блока и перестроения.
+    const their = ctx()?.stage === 'their';
+    const fixed = !!ui.draft?.block;
+    const netX = their && !(fixed && hit?.hands) ? (hit?.net?.x ?? (inNetBand(p) ? p.x : null)) : null;
+    const hp = netX != null ? null : hit?.player ?? null;
+    const bh = their && !ui.draft?.block && netX != null ? { x: +Math.max(0, Math.min(9, netX)).toFixed(1) } : null;
+    if (JSON.stringify(bh) !== JSON.stringify(ui.blockHover)) { ui.blockHover = bh; ui.cand = undefined; }
     const cand = liveCandidate(p);
     if (hp !== ui.hoverPid || cand !== ui.cand) { ui.hoverPid = hp; ui.cand = cand; paintPlayers(); }
     if (!p) { el.classList.remove('on'); paintPreview(); return; }
@@ -279,16 +286,15 @@ function formation(c) {
   const rot = st.rally.rot, F = ui.settings.formations;
   for (const id of st.set.lineup) {
     const z = zoneOfId(id);
-    let s = kind === 'att' ? (id === gs ? SETTER_SPOT : ATTACK[z]) : spotFor(F, kind, rot, z);
+    // Атака: из расстановок команды; пасующий (если пасует не тот, кто в зоне связующего, — например, в 4-2) — к сетке.
+    let s = kind === 'att' ? (id === gs && z !== rot ? SETTER_SPOT : spotFor(F, 'att', rot, z)) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st.rally.server === id) s = { x: 7.6, y: -0.9 };
     out[id] = s;
   }
   if (kind === 'def') {
-    // Блок: двое из передней линии напротив удара — к сетке; третий отходит на трёхметровую под скидку.
-    const origin = c?.origin ?? ui.draft?.origin;
-    const bl = origin ? ourBlockers(origin) : [];
-    for (const b of bl) out[b.id] = { x: b.x, y: NET - 0.55 };
-    if (bl.length) for (const id of frontRow()) if (!bl.some(b => b.id === id)) out[id] = { x: out[id].x < 4.5 ? 1.0 : 8.0, y: 5.8 };
+    // Блок поставлен (или мышь у сетки) — команда перестраивается под блок слева / по центру / справа.
+    const lay = blockLayout();
+    if (lay) for (const id of st.set.lineup) out[id] = lay.spots[zoneOfId(id)] ?? out[id];
   }
   return out;
 }
@@ -304,13 +310,21 @@ function nearest(p, { exclude = [], only = null } = {}) {
   }
   return best;
 }
-// Наш блок на удар соперника: двое из передней линии ближе всего к месту удара.
-function ourBlockers(origin) {
-  if (!origin || !ui.st?.set) return [];
-  const base = id => spotFor(ui.settings.formations, 'def', ui.st.rally.rot, zoneOfId(id));
-  const fr = frontRow().sort((a, b) => Math.abs(base(a).x - origin.x) - Math.abs(base(b).x - origin.x)).slice(0, 2);
-  return fr.map(id => ({ id, x: Math.max(0.5, Math.min(8.5, base(id).x * 0.4 + origin.x * 0.6)) }));
+// Наш блок: зафиксированный кликом у сетки (ui.draft.block) или предпросмотр под мышью (ui.blockHover).
+function blockLayout() {
+  if (!ui.st?.set) return null;
+  const b = ui.draft?.block ?? ui.blockHover;
+  if (!b) return null;
+  const base = tableFor(ui.settings.formations, 'def', ui.st.rally.rot);
+  return defenseLayout(base, b);
 }
+function ourBlockers() {
+  const lay = blockLayout();
+  if (!lay) return [];
+  return ui.st.set.lineup.filter(id => lay.blockers.includes(zoneOfId(id))).map(id => ({ id, x: lay.spots[zoneOfId(id)].x }));
+}
+// Полоса у сетки на нашей стороне: здесь ставится блок.
+const inNetBand = p => p && p.y >= NET - 0.45 && p.y < NET + 0.35 && p.x > -0.5 && p.x < 9.5;
 
 // Текущий шаг. Без черновика шаг выводится из состояния розыгрыша — ввод с телефона и правки поток не ломают.
 function ctx() {
@@ -320,7 +334,7 @@ function ctx() {
   if (d.touch) return { stage: 'touch2', touch: d.touch };
   if (r.phase === 'serve') return { stage: 'serve', p: r.server };
   if (r.phase === 'rec') return { stage: 'rec' };
-  if (r.phase === 'their') return { stage: 'their', origin: d.origin ?? null };
+  if (r.phase === 'their') return { stage: 'their', origin: d.origin ?? null, block: d.block ?? null };
   const last = rallyPlays().filter(p => !p.virtual).at(-1);
   if (d.att || last?.skill === 'set') {
     const from = d.att?.from ?? last?.to ?? spotOfTarget({ dir: 4 });
@@ -391,7 +405,13 @@ function onCourtPick(p, e, hit) {
   if (!c) return;
   pauseForInput();
   const right = e.button === 2;
-  const id = hit?.player;
+  // Мяч у соперника: клик по сетке ставит (переставляет) наш блок — раньше, чем клик по игроку у сетки.
+  if (c.stage === 'their' && !(ui.draft?.block && hit?.hands) && (hit?.net || inNetBand(p))) {
+    const x = Math.max(0, Math.min(9, hit?.net?.x ?? p.x));
+    ui.draft = { ...ui.draft, block: { x, side: blockSide(x) } }; ui.blockHover = null;
+    return render();
+  }
+  const id = hit?.hands ? null : hit?.player;
 
   if (c.stage === 'await') {
     if (id) return confirmPlayer(c, id);
@@ -430,7 +450,9 @@ function stepPoint(c, p, right, hit) {
     case 'free':
     case 'their': {
       if (hit?.hands === 'us') return ourBlockMenu(p);
-      if (p.y >= NET) { if (c.stage === 'their') { ui.draft = { origin: p }; render(); } return; }
+      // Клик по сетке — поставить наш блок (по центру — один, у краёв — двое); команда перестроится.
+      if (c.stage === 'their' && inNetBand(p)) { ui.draft = { ...ui.draft, block: { x: p.x, side: blockSide(p.x) } }; ui.blockHover = null; render(); return; }
+      if (p.y >= NET) { if (c.stage === 'their') { ui.draft = { ...ui.draft, origin: p }; render(); } return; }
       if (!inCourtUs(p)) return postAct({ skill: 'team', res: 'oppError', p: null, to: p });
       if (right) return postAct({ skill: 'team', res: c.stage === 'rec' ? 'oppAce' : 'oppKill', p: null, to: p });
       return awaitPlayer('touch', p, nearest(p), { touchKind: c.stage === 'rec' ? 'rec' : 'dig', from: c.origin ?? null });
@@ -472,13 +494,13 @@ function blockMenu(p, c) {
   ], 'Блок соперника');
 }
 function ourBlockMenu(p) {
-  const bl = ourBlockers(ui.draft?.origin ?? p);
+  const bl = ourBlockers();
   const blocker = bl.length ? bl.reduce((a, b) => (Math.abs(b.x - p.x) < Math.abs(a.x - p.x) ? b : a)).id : nearest({ x: p.x, y: NET - 0.5 }, { only: frontRow() });
   const at = { x: p.x, y: NET - 0.1 };
   const from = ui.draft?.origin;
   openMenu(at, 2.9, [
     ['Блок: очко', 'g', () => postAct({ skill: 'blk', res: 'point', p: blocker, to: at, ...(from && { from }) })],
-    ['Касание — мяч у нас', 'y', () => { postAct({ skill: 'blk', res: 'touch', p: blocker, to: at, ...(from && { from }) }); ui.draft = { origin: from }; render(); }],
+    ['Касание — мяч у нас', 'y', () => { const block = ui.draft?.block; postAct({ skill: 'blk', res: 'touch', p: blocker, to: at, ...(from && { from }) }); ui.draft = { origin: from, block }; render(); }],
     ['Блок-аут — очко им', 'r', () => postAct({ skill: 'blk', res: 'out', p: blocker, to: at, ...(from && { from }) })],
   ], `Наш блок: ${esc(name(blocker))}`);
 }
@@ -587,7 +609,12 @@ function focusPlays() {
     if (pl) return plays.filter(p => p.set === pl.set && p.rally === pl.rally);
   }
   if (ui.focusRally) return rallyByKey(ui.focusRally)?.plays ?? [];
-  return rallyPlays();
+  // Во время ввода — только текущая фаза: когда мяч перешёл к сопернику, прошлые линии убираем.
+  const rp = rallyPlays();
+  const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'blk.touch', 'team.over']);
+  let k = -1;
+  rp.forEach((p, i) => { if (CROSS.has(`${p.skill}.${p.res}`)) k = i; });
+  return k >= 0 && baseStage(ctx()) === 'their' ? [] : rp.slice(k + 1);
 }
 
 // Линии за мышью: подача, доводка к связующему, дуга паса, удар; руки блока.
@@ -611,10 +638,12 @@ function paintPreview() {
   }
   if ((st === 'rec' || st === 'their' || st === 'free') && (a?.point || (m && m.y < NET))) {
     const to = a?.point ?? m, origin = st === 'rec' ? DEFAULT_SPOT.serveThem : (a?.from ?? c.origin);
-    if (origin) pv.push({ from: origin, to, y0: st === 'rec' ? 2.7 : 3.1, y1: 0.7, apex: st === 'rec' ? 4.2 : 3.3, color: 0xff9f8a, dashed: st === 'rec', ball: true, ballAtEnd: !!a });
+    if (origin && (st !== 'their' || a)) pv.push({ from: origin, to, y0: st === 'rec' ? 2.7 : 3.1, y1: 0.7, apex: st === 'rec' ? 4.2 : 3.3, color: 0xff9f8a, dashed: st === 'rec', ball: true, ballAtEnd: !!a });
   }
   if (st === 'serve' && m && m.y >= NET) pv.push({ from: DEFAULT_SPOT.serveUs, to: m, y0: 2.7, y1: 0.3, apex: 4.4, color: inCourtThem(m) ? 0x63a1ff : 0xff6363, dashed: true, ball: true });
-  if (st === 'their') hands = ourBlockers(c.origin ?? a?.from ?? (m && m.y >= NET ? m : null)).map(b => ({ x: b.x, side: 'us' }));
+  if (st === 'their') hands = ourBlockers().map(b => ({ x: b.x, side: 'us' }));
+  // Удар соперника: от места удара (или от блока, если удар не отмечен) к мыши на нашей половине.
+  if (st === 'their' && !a && m && m.y < NET - 0.45 && (c.origin || c.block)) pv.push({ from: c.origin ?? { x: c.block.x, y: 10.2 }, to: m, y0: 3.1, y1: 0.4, apex: 3.3, color: 0xff9f8a, ball: true });
   court.setPreview(pv);
   court.setHands(hands);
   court.setWheelCapture(st === 'set');
@@ -686,6 +715,7 @@ function paintBar() {
   }
   if (['touch2', 'rec', 'their', 'free'].includes(st)) parts.push(btn('ballDown', st === 'rec' && !ui.draft?.touch ? 'Эйс соперника' : 'Мяч упал', 'r', '', 'X'));
   if (st === 'att') parts.push(btn('netErr', 'Сетка', 'r', '', 'N'));
+  if (st === 'their') parts.push(btn('act', 'Ошибка соперника', 'g', 'data-skill="team" data-res="oppError"', '+'), ...(c.block ? [btn('blockOff', 'Без блока')] : []));
   parts.push('<span class="grow"></span>', btn('pt', '+1', 'g opt', 'data-side="us" title="Очко нам без статистики"'), btn('pt', '+1', 'r opt', 'data-side="them" title="Очко им без статистики"'), btn('flip', icon('i-swap'), 'opt', 'title="Мяч на другой стороне (если программа ошиблась)"'));
   el.innerHTML = parts.join('');
 }
@@ -976,9 +1006,9 @@ const STEP_HINT = {
   await: c => `${AWAIT_HINT[c.kind]} Кликните <b>подсвеченного</b> ${who(ui.hoverPid ?? c.suggest)} или другого игрока · <span class="kbd">⏎</span> — подсвеченный${c.kind === 'setter' ? ` · приём: <b>${LABELS[c.touch.kind][c.res].split(' ').pop()}</b>` : ''}`,
   serve: c => `Подача ${who(c.p)}: клик на их половине — <b>в игру</b> · ПКМ — эйс / сложная · за линией или в сетку — ошибка`,
   rec: () => `<b>Приём</b>: клик, куда пришла подача (или сразу по игроку) · ПКМ — эйс соперника`,
-  their: c => c.origin
-    ? `<b>Удар соперника</b>: клик по нашей площадке — куда пришёл (защита) · по рукам — <b>наш блок</b> · ПКМ — не подняли · за линией — аут`
-    : `<b>Мяч у них</b>: клик на их половине — откуда бьют (можно пропустить) · по нашей площадке — куда пришёл мяч`,
+  their: c => c.block
+    ? `<b>Блок ${{ left: 'слева', center: 'по центру', right: 'справа' }[c.block.side]}</b> · клик на их половине — откуда бьют · по нашей площадке — куда пришёл мяч · по <b>рукам</b> — результат блока · ПКМ — не подняли`
+    : `<b>Мяч у них</b>: ведите мышь по <b>сетке</b> — блок (клик ставит) · на их половине — откуда бьют · по нашей площадке — куда пришёл мяч`,
   free: () => `<b>Мяч у нас</b>: клик, где первое касание`,
   touch2: c => `${who(c.touch.p)} — ${c.touch.kind === 'rec' ? 'приём' : 'защита'}. Клик — <b>куда пришёл мяч к пасующему</b> (оценка по зонам доводки) или сразу по пасующему · на их сторону — перекид`,
   set: c => `Пас ${who(c.p)}: клик — <b>откуда бьют</b> (или сразу по нападающему) · колесо — высота · на их сторону — скидка`,
@@ -1151,7 +1181,11 @@ function openFormEditor() {
   paintFormEditor();
 }
 function paintFormEditor() {
-  const f = ui.fEdit, tab = f.data[f.kind][f.rot], ref = refLineup(f.rot);
+  const f = ui.fEdit, ref = refLineup(f.rot);
+  // В защите можно посмотреть, как команда перестроится под блок слева / по центру / справа (это считается само).
+  const view = f.kind === 'def' ? f.defView ?? 'base' : 'base';
+  const base = f.data[f.kind][f.rot];
+  const tab = view === 'base' ? base : defenseLayout(base, { x: { left: 1.5, center: 4.5, right: 7.5 }[view] }).spots;
   const sy = y => 9 - y; // сетка сверху
   const tokens = [1, 2, 3, 4, 5, 6].map(z => {
     const p = tab[z], id = ref?.[z], pl = id ? person(id) : null;
@@ -1162,9 +1196,11 @@ function paintFormEditor() {
   }).join('');
   const ghosts = [1, 2, 3, 4, 5, 6].map(z => { const b = ZONE_SPOT[z]; return `<text class="fz" x="${b.x}" y="${sy(b.y) + 0.15}">${z}</text>`; }).join('');
   modal(`<h2>Расстановки команды</h2>
-    <p>Перетащите игроков: как команда стоит в каждой расстановке. В <b>Р${f.rot}</b> связующий — в зоне ${f.rot}.
-      Атака одинаковая для всех расстановок: нападающие разбегаются, связующий выходит к сетке — это программа делает сама.</p>
+    <p>Перетащите игроков: как команда стоит в каждой расстановке (игровые позиции; «зона N» на фишке — где игрок по протоколу).
+      В <b>Р${f.rot}</b> связующий — в зоне ${f.rot}. В защите задайте базовую расстановку — под блок слева / по центру / справа команда
+      перестроится сама: кто левее, центральнее и правее в передней и задней линии, тот и займёт своё место.</p>
     <div class="fbar"><div class="seg">${Object.entries(SITUATIONS).map(([k, v]) => `<button class="${f.kind === k ? 'on' : ''}" data-a="fKind" data-v="${k}">${v}</button>`).join('')}</div>
+      ${f.kind === 'def' ? `<div class="seg" title="Как команда встанет, когда поставите блок у сетки">${[['base', 'Базовая'], ['left', 'Блок слева'], ['center', 'По центру'], ['right', 'Справа']].map(([k, v]) => `<button class="${view === k ? 'on' : ''}" data-a="fDefView" data-v="${k}">${v}</button>`).join('')}</div>` : ''}
       <div class="seg" title="В порядке переходов: игроки идут по часовой стрелке, номер расстановки — против">${[1, 6, 5, 4, 3, 2].map(r => `<button class="${f.rot === r ? 'on' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}</div></div>
     <div class="zwrap"><svg id="fsvg" viewBox="-1.6 -1.1 12.2 13.4">
       <rect x="0" y="0" width="9" height="9" fill="#1d3a57"/>
@@ -1181,7 +1217,7 @@ function paintFormEditor() {
   const svg = $('fsvg');
   let drag = null;
   const pt = e => { const q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); };
-  svg.onpointerdown = e => { const g = e.target.closest('.ftok'); if (!g) return; drag = +g.dataset.z; svg.setPointerCapture(e.pointerId); };
+  svg.onpointerdown = e => { if (view !== 'base') return toast('Это предпросмотр — двигайте игроков в «Базовой»'); const g = e.target.closest('.ftok'); if (!g) return; drag = +g.dataset.z; svg.setPointerCapture(e.pointerId); };
   svg.onpointermove = e => {
     if (!drag) return;
     const q = pt(e);
@@ -1645,10 +1681,12 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  blockOff: () => { if (ui.draft) delete ui.draft.block; render(); },
   evView: d => { ui.evView = d.v; store.set('evView', d.v); paintSide(); },
   pickRally: d => pickRally(d.k),
   formEditor: () => openFormEditor(),
-  fKind: d => { ui.fEdit.kind = d.v; paintFormEditor(); },
+  fKind: d => { ui.fEdit.kind = d.v; ui.fEdit.defView = 'base'; paintFormEditor(); },
+  fDefView: d => { ui.fEdit.defView = d.v; paintFormEditor(); },
   fRot: d => { ui.fEdit.rot = +d.v; paintFormEditor(); },
   fReset: () => { const f = ui.fEdit; f.data[f.kind][f.rot] = Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, { ...defaultSpot(f.kind, f.rot, z) }])); paintFormEditor(); },
   fCopy: () => {
