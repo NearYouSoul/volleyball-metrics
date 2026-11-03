@@ -1166,34 +1166,58 @@ function paintZones() {
 // ---------- Редактор расстановок ----------
 // Как команда стоит в каждой из шести расстановок: на приёме, на своей подаче и в защите.
 // Позиции задаются для зоны (в Рn связующий в зоне n), поэтому подходят к любому составу.
-function refLineup(rot) {
-  // Чтобы на фишках были номера: берём стартовый состав последней партии этого матча.
+// Расстановки связаны: Р1 → Р6 → Р5 → Р4 → Р3 → Р2 — порядок переходов (игроки идут по часовой стрелке).
+const GAME_ORDER = [1, 6, 5, 4, 3, 2];
+const prevRot = r => GAME_ORDER[(GAME_ORDER.indexOf(r) + 5) % 6];
+const nextRot = r => GAME_ORDER[(GAME_ORDER.indexOf(r) + 1) % 6];
+// Игроки по слотам (порядок подачи): номера — из стартового состава последней партии, если она есть.
+function refSlots() {
   const set = ui.st?.sets.at(-1);
-  if (!set || set.mainSlot < 0) return null;
-  const z1 = [0, 1, 2, 3, 4, 5].find(k => zoneOfSlot(set.mainSlot, k) === rot);
-  const zones = slotZones(z1);
-  return Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, set.start[zones.indexOf(z)]]));
+  return set && set.mainSlot >= 0 ? { start: set.start, ms: set.mainSlot } : { start: null, ms: 0 };
+}
+// В какой зоне слот s в расстановке r (в Рr связующий — в зоне r).
+function slotZone(s, r, ms) {
+  const z1 = [0, 1, 2, 3, 4, 5].find(k => zoneOfSlot(ms, k) === r);
+  return zoneOfSlot(s, z1);
 }
 function openFormEditor() {
   const data = {};
   for (const k of Object.keys(SITUATIONS)) { data[k] = {}; for (let r = 1; r <= 6; r++) data[k][r] = tableFor(ui.settings.formations, k, r); }
-  ui.fEdit = { kind: 'rec', rot: ui.st?.rally?.rot ?? 1, data };
+  const touched = JSON.parse(JSON.stringify(ui.settings.formations?.touched ?? {}));
+  ui.fEdit = { kind: 'rec', rot: ui.st?.rally?.rot ?? 1, data, touched, inherited: {} };
   paintFormEditor();
 }
-function paintFormEditor() {
-  const f = ui.fEdit, ref = refLineup(f.rot);
+const isTouched = (f, k, r) => !!f.touched[k]?.[r];
+// Переход в расстановку: если её ещё не настраивали — все сдвигаются на переход из предыдущей и встают на её места.
+function goRot(r) {
+  const f = ui.fEdit, from = f.rot, k = f.kind;
+  const pr = prevRot(r);
+  if (!isTouched(f, k, r) && (isTouched(f, k, pr) || f.inherited[k]?.[pr])) {
+    f.data[k][r] = JSON.parse(JSON.stringify(f.data[k][pr]));
+    (f.inherited[k] ??= {})[r] = true;
+  }
+  f.rot = r;
+  paintFormEditor(from);
+}
+function paintFormEditor(fromRot = null) {
+  const f = ui.fEdit, { start, ms } = refSlots();
   // В защите можно посмотреть, как команда перестроится под блок слева / по центру / справа (это считается само).
   const view = f.kind === 'def' ? f.defView ?? 'base' : 'base';
   const base = f.data[f.kind][f.rot];
   const tab = view === 'base' ? base : defenseLayout(base, { x: { left: 1.5, center: 4.5, right: 7.5 }[view] }).spots;
   const sy = y => 9 - y; // сетка сверху
-  const tokens = [1, 2, 3, 4, 5, 6].map(z => {
-    const p = tab[z], id = ref?.[z], pl = id ? person(id) : null;
-    const role = pl ? ROLES[roleOf(pl)]?.short ?? '' : z === f.rot ? 'С' : '';
-    return `<g class="ftok ${z === f.rot ? 'setter' : ''}" data-z="${z}" transform="translate(${p.x} ${sy(p.y)})">
+  // Фишки по игрокам (слотам): при переходе на другую расстановку каждый плавно едет из старой точки в новую.
+  const oldTab = fromRot != null && fromRot !== f.rot ? f.data[f.kind][fromRot] : null;
+  const tokens = [0, 1, 2, 3, 4, 5].map(sl => {
+    const z = slotZone(sl, f.rot, ms), p = tab[z];
+    const o = oldTab ? oldTab[slotZone(sl, fromRot, ms)] : p;
+    const id = start?.[sl], pl = id ? person(id) : null;
+    const role = pl ? ROLES[roleOf(pl)]?.short ?? '' : sl === ms ? 'С' : '';
+    return `<g class="ftok ${z === f.rot ? 'setter' : ''}" data-z="${z}" data-tx="${p.x} ${sy(p.y)}" style="transform: translate(${o.x}px, ${sy(o.y)}px)">
       <circle r=".46"/><text class="n" y=".15">${pl ? esc(pl.num || pl.name.slice(0, 2)) : z}</text>
       <text class="r" y="-.62">${role ? role + ' · ' : ''}зона ${z}</text></g>`;
   }).join('');
+  const inh = f.inherited[f.kind]?.[f.rot] && !isTouched(f, f.kind, f.rot);
   const ghosts = [1, 2, 3, 4, 5, 6].map(z => { const b = ZONE_SPOT[z]; return `<text class="fz" x="${b.x}" y="${sy(b.y) + 0.15}">${z}</text>`; }).join('');
   modal(`<h2>Расстановки команды</h2>
     <p>Перетащите игроков: как команда стоит в каждой расстановке (игровые позиции; «зона N» на фишке — где игрок по протоколу).
@@ -1201,7 +1225,9 @@ function paintFormEditor() {
       перестроится сама: кто левее, центральнее и правее в передней и задней линии, тот и займёт своё место.</p>
     <div class="fbar"><div class="seg">${Object.entries(SITUATIONS).map(([k, v]) => `<button class="${f.kind === k ? 'on' : ''}" data-a="fKind" data-v="${k}">${v}</button>`).join('')}</div>
       ${f.kind === 'def' ? `<div class="seg" title="Как команда встанет, когда поставите блок у сетки">${[['base', 'Базовая'], ['left', 'Блок слева'], ['center', 'По центру'], ['right', 'Справа']].map(([k, v]) => `<button class="${view === k ? 'on' : ''}" data-a="fDefView" data-v="${k}">${v}</button>`).join('')}</div>` : ''}
-      <div class="seg" title="В порядке переходов: игроки идут по часовой стрелке, номер расстановки — против">${[1, 6, 5, 4, 3, 2].map(r => `<button class="${f.rot === r ? 'on' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}</div></div>
+      <div class="seg" title="В порядке переходов: игроки идут по часовой стрелке, номер расстановки — против">
+        <button data-a="fStep" data-d="-1" title="Предыдущий переход">◀</button>${GAME_ORDER.map(r => `<button class="${f.rot === r ? 'on' : ''} ${isTouched(f, f.kind, r) ? 'done' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}<button data-a="fStep" data-d="1" title="Следующий переход">▶</button></div></div>
+    ${inh ? `<div class="banner" style="margin:0 0 8px">Р${f.rot} ещё не настроена — игроки сдвинуты на один переход из Р${prevRot(f.rot)}. Поправьте места — и она запомнится.</div>` : ''}
     <div class="zwrap"><svg id="fsvg" viewBox="-1.6 -1.1 12.2 13.4">
       <rect x="0" y="0" width="9" height="9" fill="#1d3a57"/>
       <rect x="0" y="0" width="9" height="3" fill="rgb(255 255 255 / .04)"/>
@@ -1217,15 +1243,26 @@ function paintFormEditor() {
   const svg = $('fsvg');
   let drag = null;
   const pt = e => { const q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); };
-  svg.onpointerdown = e => { if (view !== 'base') return toast('Это предпросмотр — двигайте игроков в «Базовой»'); const g = e.target.closest('.ftok'); if (!g) return; drag = +g.dataset.z; svg.setPointerCapture(e.pointerId); };
+  // Сначала фишки стоят на старых местах, на следующем кадре едут на новые (CSS-переход).
+  requestAnimationFrame(() => requestAnimationFrame(() => svg.querySelectorAll('.ftok').forEach(g => { const [x, y] = g.dataset.tx.split(' '); g.style.transform = `translate(${x}px, ${y}px)`; })));
+  svg.onpointerdown = e => {
+    if (view !== 'base') return toast('Это предпросмотр — двигайте игроков в «Базовой»');
+    const g = e.target.closest('.ftok'); if (!g) return;
+    drag = +g.dataset.z; g.classList.add('dragging'); svg.setPointerCapture(e.pointerId);
+  };
   svg.onpointermove = e => {
     if (!drag) return;
     const q = pt(e);
     const x = Math.max(-1, Math.min(10, Math.round(q.x * 10) / 10)), y = Math.max(-2.5, Math.min(9, Math.round((9 - q.y) * 10) / 10));
     tab[drag] = { x, y };
-    svg.querySelector(`.ftok[data-z="${drag}"]`).setAttribute('transform', `translate(${x} ${9 - y})`);
+    svg.querySelector(`.ftok[data-z="${drag}"]`).style.transform = `translate(${x}px, ${9 - y}px)`;
   };
-  svg.onpointerup = () => { drag = null; };
+  svg.onpointerup = () => {
+    if (!drag) return;
+    drag = null;
+    svg.querySelector('.ftok.dragging')?.classList.remove('dragging');
+    if (!isTouched(f, f.kind, f.rot)) { (f.touched[f.kind] ??= {})[f.rot] = true; paintFormEditor(); }
+  };
 }
 
 // ---------- Видео ----------
@@ -1685,18 +1722,28 @@ const H = {
   evView: d => { ui.evView = d.v; store.set('evView', d.v); paintSide(); },
   pickRally: d => pickRally(d.k),
   formEditor: () => openFormEditor(),
-  fKind: d => { ui.fEdit.kind = d.v; ui.fEdit.defView = 'base'; paintFormEditor(); },
+  fKind: d => { ui.fEdit.kind = d.v; ui.fEdit.defView = 'base'; goRot(ui.fEdit.rot); },
   fDefView: d => { ui.fEdit.defView = d.v; paintFormEditor(); },
-  fRot: d => { ui.fEdit.rot = +d.v; paintFormEditor(); },
-  fReset: () => { const f = ui.fEdit; f.data[f.kind][f.rot] = Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, { ...defaultSpot(f.kind, f.rot, z) }])); paintFormEditor(); },
+  fRot: d => goRot(+d.v),
+  fStep: d => goRot(+d.d > 0 ? nextRot(ui.fEdit.rot) : prevRot(ui.fEdit.rot)),
+  fReset: () => {
+    const f = ui.fEdit;
+    f.data[f.kind][f.rot] = Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, { ...defaultSpot(f.kind, f.rot, z) }]));
+    if (f.touched[f.kind]) delete f.touched[f.kind][f.rot];
+    if (f.inherited[f.kind]) delete f.inherited[f.kind][f.rot];
+    paintFormEditor();
+  },
   fCopy: () => {
     const f = ui.fEdit, src = f.data[f.kind][f.rot];
     if (!confirm(`Поставить «${SITUATIONS[f.kind]}» во всех расстановках как в Р${f.rot}? Позиции считаются по зонам.`)) return;
-    for (let r = 1; r <= 6; r++) f.data[f.kind][r] = JSON.parse(JSON.stringify(src));
+    for (let r = 1; r <= 6; r++) { f.data[f.kind][r] = JSON.parse(JSON.stringify(src)); (f.touched[f.kind] ??= {})[r] = true; }
     paintFormEditor();
   },
   fSave: () => call(async () => {
-    ui.settings = await api('PUT', '/api/settings', { formations: ui.fEdit.data });
+    // Унаследованные (сдвинутые) расстановки тоже сохраняем как настроенные — это то, что вы видели.
+    const f = ui.fEdit;
+    for (const k in f.inherited) for (const r in f.inherited[k]) (f.touched[k] ??= {})[r] = true;
+    ui.settings = await api('PUT', '/api/settings', { formations: { ...f.data, touched: f.touched } });
     modal('');
     recompute();
     toast('Расстановки сохранены — игроки на площадке встают по ним');
