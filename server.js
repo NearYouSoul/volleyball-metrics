@@ -163,7 +163,8 @@ async function api(req, url) {
       opponent: refs.settings.opponents.find(o => o.id === opponentId)?.name || 'Соперник', // запасное имя, если соперника удалят
       created: new Date().toISOString(),
       roster: refs.roster, // копия состава на момент матча
-      system: refs.settings.system || '5-1', // схема игры: 5-1, 4-2, 6-2, гибрид
+      // Пресет команды (расстановки + схема) — активный в настройках; схема — из пресета.
+      ...(() => { const pr = refs.settings.presets?.find(x => x.id === refs.settings.activePreset); return { system: pr?.system || refs.settings.system || '5-1', ...(pr && { preset: pr.id }) }; })(),
       videos: [],
       events: [],
     };
@@ -238,6 +239,7 @@ async function api(req, url) {
       if (!match) return null;
       if (Array.isArray(patch.videos)) match.videos = patch.videos;
       if (typeof patch.system === 'string') match.system = patch.system;
+      if (typeof patch.preset === 'string') match.preset = patch.preset;
       await writeJson(file, match);
       return hydrate(match, await loadRefs());
     });

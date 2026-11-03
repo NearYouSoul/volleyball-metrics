@@ -5,7 +5,7 @@ import { replay, playerName, LABELS, ACTIONS, SKILLS } from '../engine.js';
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
-import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide } from '../formations.js';
+import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide, overlapIssues } from '../formations.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -275,6 +275,18 @@ const zoneOfId = id => ui.st.rally.zones[ui.st.set.lineup.indexOf(id)];
 const frontRow = () => ui.st.set.lineup.filter(id => isFrontZone(zoneOfId(id)));
 const isFrontZone = z => z >= 2 && z <= 4;
 
+// ---------- Пресеты команды ----------
+// Пресет — именованный набор: схема игры, стартовый состав и все расстановки (приём, подача, защита, атака по Р1–Р6).
+// Матч использует свой пресет (выбирается во вкладке «Матч»), новые матчи — активный пресет из настроек.
+function presets() {
+  const list = ui.settings.presets;
+  if (list?.length) return list;
+  return [{ id: 'main', name: 'Основной', system: ui.settings.system || '5-1', formations: ui.settings.formations ?? {} }];
+}
+const presetById = id => presets().find(p => p.id === id);
+const curPreset = () => presetById(ui.match?.preset) ?? presetById(ui.settings.activePreset) ?? presets()[0];
+const FORM = () => curPreset().formations ?? {};
+
 // ---------- Расстановка по ситуации ----------
 // Подача, приём и защита — из расстановок команды (редактор «Расстановки», по умолчанию — стандартные).
 // Атака одинаковая: нападающие на разбеге, связующий (в том числе из задней линии) выходит к сетке.
@@ -283,7 +295,7 @@ function formation(c) {
   const gs = guessedSetter();
   const stage = c?.stage === 'await' ? c.base : c?.stage;
   const kind = stage === 'serve' ? 'serve' : stage === 'rec' ? 'rec' : stage === 'their' ? 'def' : stage ? 'att' : 'serve';
-  const rot = st.rally.rot, F = ui.settings.formations;
+  const rot = st.rally.rot, F = FORM();
   for (const id of st.set.lineup) {
     const z = zoneOfId(id);
     // Атака: из расстановок команды; пасующий (если пасует не тот, кто в зоне связующего, — например, в 4-2) — к сетке.
@@ -315,7 +327,7 @@ function blockLayout() {
   if (!ui.st?.set) return null;
   const b = ui.draft?.block ?? ui.blockHover;
   if (!b) return null;
-  const base = tableFor(ui.settings.formations, 'def', ui.st.rally.rot);
+  const base = tableFor(FORM(), 'def', ui.st.rally.rot);
   return defenseLayout(base, b);
 }
 function ourBlockers() {
@@ -936,6 +948,9 @@ function sideMatch() {
         <span>Партии</span><b class="mono">${st.sets.map(s => `${s.us}:${s.them}`).join(', ') || '—'}</b>
         <span>Событий</span><b class="mono">${m.events.length}</b>
       </div>
+      <div class="field" style="display:grid;gap:6px;margin-top:12px;font-size:12.5px;color:var(--smoke)">Пресет команды (расстановки)
+        <select data-k="matchPreset">${presets().map(p => `<option value="${p.id}" ${curPreset().id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+      </div>
       <div class="field" style="display:grid;gap:6px;margin-top:12px;font-size:12.5px;color:var(--smoke)">Схема игры
         <select data-k="system">${sys}</select>
         <span>Схема только подсказывает, кто пасует. В любом касании можно выбрать другого игрока — нестандартные перемещения не мешают.</span>
@@ -1035,7 +1050,10 @@ const modalOpen = () => !!$('modal').innerHTML;
 
 function openLineup() {
   const last = ui.st.sets.at(-1);
-  ui.lineupDraft = { order: last ? last.start.filter(id => ui.match.roster.some(p => p.id === id)) : [], weServe: true, setter: last?.main ?? null };
+  // Нет прошлой партии — берём стартовый состав пресета команды.
+  const pl = curPreset().lineup;
+  const from = last ? { start: last.start, main: last.main } : pl;
+  ui.lineupDraft = { order: from ? from.start.filter(id => ui.match.roster.some(p => p.id === id)) : [], weServe: true, setter: from?.main ?? null };
   paintLineup();
 }
 function paintLineup() {
@@ -1172,6 +1190,8 @@ const prevRot = r => GAME_ORDER[(GAME_ORDER.indexOf(r) + 5) % 6];
 const nextRot = r => GAME_ORDER[(GAME_ORDER.indexOf(r) + 1) % 6];
 // Игроки по слотам (порядок подачи): номера — из стартового состава последней партии, если она есть.
 function refSlots() {
+  const pl = ui.fEdit ? editPreset()?.lineup : curPreset().lineup;
+  if (pl?.start?.length === 6) return { start: pl.start, ms: Math.max(0, pl.start.indexOf(pl.main)) };
   const set = ui.st?.sets.at(-1);
   return set && set.mainSlot >= 0 ? { start: set.start, ms: set.mainSlot } : { start: null, ms: 0 };
 }
@@ -1180,13 +1200,22 @@ function slotZone(s, r, ms) {
   const z1 = [0, 1, 2, 3, 4, 5].find(k => zoneOfSlot(ms, k) === r);
   return zoneOfSlot(s, z1);
 }
-function openFormEditor() {
+// Рабочие копии всех пресетов: правки разных пресетов не теряются при переключении, сохраняются разом.
+function presetWork(pr) {
   const data = {};
-  for (const k of Object.keys(SITUATIONS)) { data[k] = {}; for (let r = 1; r <= 6; r++) data[k][r] = tableFor(ui.settings.formations, k, r); }
-  const touched = JSON.parse(JSON.stringify(ui.settings.formations?.touched ?? {}));
-  ui.fEdit = { kind: 'rec', rot: ui.st?.rally?.rot ?? 1, data, touched, inherited: {} };
+  for (const k of Object.keys(SITUATIONS)) { data[k] = {}; for (let r = 1; r <= 6; r++) data[k][r] = tableFor(pr.formations, k, r); }
+  return { id: pr.id, name: pr.name, system: pr.system || '5-1', lineup: pr.lineup ?? null, data, touched: JSON.parse(JSON.stringify(pr.formations?.touched ?? {})), inherited: {} };
+}
+function openFormEditor() {
+  const works = presets().map(presetWork);
+  const cur = curPreset().id;
+  ui.fEdit = { kind: 'rec', rot: ui.st?.rally?.rot ?? 1, works, presetId: cur };
+  bindPreset();
   paintFormEditor();
 }
+const editPreset = () => ui.fEdit?.works.find(w => w.id === ui.fEdit.presetId);
+// Поля редактора смотрят в рабочую копию выбранного пресета.
+function bindPreset() { const w = editPreset(); Object.assign(ui.fEdit, { data: w.data, touched: w.touched, inherited: w.inherited }); }
 const isTouched = (f, k, r) => !!f.touched[k]?.[r];
 // Переход в расстановку: если её ещё не настраивали — все сдвигаются на переход из предыдущей и встают на её места.
 function goRot(r) {
@@ -1205,6 +1234,8 @@ function paintFormEditor(fromRot = null) {
   const view = f.kind === 'def' ? f.defView ?? 'base' : 'base';
   const base = f.data[f.kind][f.rot];
   const tab = view === 'base' ? base : defenseLayout(base, { x: { left: 1.5, center: 4.5, right: 7.5 }[view] }).spots;
+  // Протокол: в момент подачи (приём и наша подача) проверяем правила расстановки.
+  const legal = view === 'base' && (f.kind === 'rec' || f.kind === 'serve') ? overlapIssues(base, { server: f.kind === 'serve' }) : null;
   const sy = y => 9 - y; // сетка сверху
   // Фишки по игрокам (слотам): при переходе на другую расстановку каждый плавно едет из старой точки в новую.
   const oldTab = fromRot != null && fromRot !== f.rot ? f.data[f.kind][fromRot] : null;
@@ -1213,13 +1244,24 @@ function paintFormEditor(fromRot = null) {
     const o = oldTab ? oldTab[slotZone(sl, fromRot, ms)] : p;
     const id = start?.[sl], pl = id ? person(id) : null;
     const role = pl ? ROLES[roleOf(pl)]?.short ?? '' : sl === ms ? 'С' : '';
-    return `<g class="ftok ${z === f.rot ? 'setter' : ''}" data-z="${z}" data-tx="${p.x} ${sy(p.y)}" style="transform: translate(${o.x}px, ${sy(o.y)}px)">
+    return `<g class="ftok ${z === f.rot ? 'setter' : ''} ${legal?.bad.has(z) ? 'bad' : ''}" data-z="${z}" data-tx="${p.x} ${sy(p.y)}" style="transform: translate(${o.x}px, ${sy(o.y)}px)">
       <circle r=".46"/><text class="n" y=".15">${pl ? esc(pl.num || pl.name.slice(0, 2)) : z}</text>
       <text class="r" y="-.62">${role ? role + ' · ' : ''}зона ${z}</text></g>`;
   }).join('');
   const inh = f.inherited[f.kind]?.[f.rot] && !isTouched(f, f.kind, f.rot);
+  const w = editPreset();
+
   const ghosts = [1, 2, 3, 4, 5, 6].map(z => { const b = ZONE_SPOT[z]; return `<text class="fz" x="${b.x}" y="${sy(b.y) + 0.15}">${z}</text>`; }).join('');
   modal(`<h2>Расстановки команды</h2>
+    <div class="pbar">Пресет
+      <select data-k="fPreset">${f.works.map(x => `<option value="${x.id}" ${x.id === f.presetId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      <select data-k="fSystem" title="Схема игры пресета">${Object.entries(SYSTEMS).map(([k, v]) => `<option value="${k}" ${w.system === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <button class="btn sm" data-a="fNew" title="Новый пресет — копия текущего">＋ Копия</button>
+      <button class="btn sm ghost" data-a="fRename">Переименовать</button>
+      ${f.works.length > 1 ? '<button class="btn sm ghost danger" data-a="fDel">Удалить</button>' : ''}
+      <span class="grow"></span>
+      ${ui.st?.sets.length ? '<button class="btn sm ghost" data-a="fTakeLineup" title="Номера на фишках — из стартового состава этого матча">Состав из матча</button>' : ''}
+    </div>
     <p>Перетащите игроков: как команда стоит в каждой расстановке (игровые позиции; «зона N» на фишке — где игрок по протоколу).
       В <b>Р${f.rot}</b> связующий — в зоне ${f.rot}. В защите задайте базовую расстановку — под блок слева / по центру / справа команда
       перестроится сама: кто левее, центральнее и правее в передней и задней линии, тот и займёт своё место.</p>
@@ -1227,6 +1269,7 @@ function paintFormEditor(fromRot = null) {
       ${f.kind === 'def' ? `<div class="seg" title="Как команда встанет, когда поставите блок у сетки">${[['base', 'Базовая'], ['left', 'Блок слева'], ['center', 'По центру'], ['right', 'Справа']].map(([k, v]) => `<button class="${view === k ? 'on' : ''}" data-a="fDefView" data-v="${k}">${v}</button>`).join('')}</div>` : ''}
       <div class="seg" title="В порядке переходов: игроки идут по часовой стрелке, номер расстановки — против">
         <button data-a="fStep" data-d="-1" title="Предыдущий переход">◀</button>${GAME_ORDER.map(r => `<button class="${f.rot === r ? 'on' : ''} ${isTouched(f, f.kind, r) ? 'done' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}<button data-a="fStep" data-d="1" title="Следующий переход">▶</button></div></div>
+    ${legal ? (legal.issues.length ? `<div class="banner bad" style="margin:0 0 8px">Нарушение расстановки при подаче: ${legal.issues.join('; ')}</div>` : `<div class="banner ok" style="margin:0 0 8px">Расстановка по правилам: линии не пересекаются до удара по мячу.</div>`) : ''}
     ${inh ? `<div class="banner" style="margin:0 0 8px">Р${f.rot} ещё не настроена — игроки сдвинуты на один переход из Р${prevRot(f.rot)}. Поправьте места — и она запомнится.</div>` : ''}
     <div class="zwrap"><svg id="fsvg" viewBox="-1.6 -1.1 12.2 13.4">
       <rect x="0" y="0" width="9" height="9" fill="#1d3a57"/>
@@ -1238,7 +1281,7 @@ function paintFormEditor(fromRot = null) {
       <text x="4.5" y="-0.45" class="fcap">сетка</text><text x="4.5" y="10.9" class="fcap">зона подачи</text>
       ${ghosts}${tokens}
     </svg></div>
-    <div class="foot"><button class="btn ghost" data-a="fReset">Сбросить Р${f.rot}</button><button class="btn ghost" data-a="fCopy">Копировать во все Р1–Р6</button><span class="grow"></span>
+    <div class="foot"><button class="btn ghost" data-a="fProto" title="Все — ровно в свои зоны по протоколу; от этого удобно расставлять">Протокольная</button><button class="btn ghost" data-a="fReset">Сбросить Р${f.rot}</button><button class="btn ghost" data-a="fCopy">Копировать во все Р1–Р6</button><span class="grow"></span>
       <button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="fSave">Сохранить</button></div>`);
   const svg = $('fsvg');
   let drag = null;
@@ -1261,7 +1304,8 @@ function paintFormEditor(fromRot = null) {
     if (!drag) return;
     drag = null;
     svg.querySelector('.ftok.dragging')?.classList.remove('dragging');
-    if (!isTouched(f, f.kind, f.rot)) { (f.touched[f.kind] ??= {})[f.rot] = true; paintFormEditor(); }
+    (f.touched[f.kind] ??= {})[f.rot] = true;
+    paintFormEditor();
   };
 }
 
@@ -1434,7 +1478,7 @@ function ballAt(keys, t) {
 function replayPlayers(r, t) {
   const st0 = stateAt(r);
   if (!st0.set) return [];
-  const lineup = st0.set.lineup, zones = st0.rally.zones, rot = st0.rally.rot, F = ui.settings.formations;
+  const lineup = st0.set.lineup, zones = st0.rally.zones, rot = st0.rally.rot, F = FORM();
   const done = r.plays.filter(p => p.vt != null && p.vt <= t);
   const last = done.at(-1);
   const crossed = last && (['serve', 'att'].includes(last.skill) && last.res !== 'kill' || ['over'].includes(last.res));
@@ -1694,7 +1738,7 @@ async function createMatch(opponentId) {
 const H = {
   tab: d => { ui.tab = d.tab; render(); },
   help: openHelp,
-  modalClose: () => modal(''),
+  modalClose: () => { modal(''); ui.fEdit = null; },
   modalBg: (d, e) => { if (e.target.classList.contains('modal-bg')) modal(''); },
   pickFile: () => $('fileInput').click(),
   view: d => { court.setView(d.v); document.querySelectorAll('[data-a=view]').forEach(b => b.classList.toggle('on', b.dataset.v === d.v)); },
@@ -1725,6 +1769,32 @@ const H = {
   fKind: d => { ui.fEdit.kind = d.v; ui.fEdit.defView = 'base'; goRot(ui.fEdit.rot); },
   fDefView: d => { ui.fEdit.defView = d.v; paintFormEditor(); },
   fRot: d => goRot(+d.v),
+  fProto: () => {
+    const f = ui.fEdit;
+    f.data[f.kind][f.rot] = Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, { ...ZONE_SPOT[z] }]));
+    (f.touched[f.kind] ??= {})[f.rot] = true;
+    paintFormEditor();
+  },
+  fNew: () => {
+    const f = ui.fEdit, src = editPreset();
+    const nm = prompt('Название нового пресета (например, «4-2 турнир»):', src.name + ' — копия');
+    if (!nm?.trim()) return;
+    const copy = JSON.parse(JSON.stringify(src));
+    Object.assign(copy, { id: newId(), name: nm.trim() });
+    f.works.push(copy); f.presetId = copy.id; bindPreset(); paintFormEditor();
+  },
+  fRename: () => { const w = editPreset(); const nm = prompt('Название пресета:', w.name); if (nm?.trim()) { w.name = nm.trim(); paintFormEditor(); } },
+  fDel: () => {
+    const f = ui.fEdit, w = editPreset();
+    if (!confirm(`Удалить пресет «${w.name}»?`)) return;
+    f.works = f.works.filter(x => x !== w); f.presetId = f.works[0].id; bindPreset(); paintFormEditor();
+  },
+  fTakeLineup: () => {
+    const set = ui.st?.sets.at(-1);
+    if (!set) return;
+    editPreset().lineup = { start: [...set.start], main: set.main };
+    toast('Стартовый состав пресета — из этого матча'); paintFormEditor();
+  },
   fStep: d => goRot(+d.d > 0 ? nextRot(ui.fEdit.rot) : prevRot(ui.fEdit.rot)),
   fReset: () => {
     const f = ui.fEdit;
@@ -1742,8 +1812,14 @@ const H = {
   fSave: () => call(async () => {
     // Унаследованные (сдвинутые) расстановки тоже сохраняем как настроенные — это то, что вы видели.
     const f = ui.fEdit;
-    for (const k in f.inherited) for (const r in f.inherited[k]) (f.touched[k] ??= {})[r] = true;
-    ui.settings = await api('PUT', '/api/settings', { formations: { ...f.data, touched: f.touched } });
+    const list = f.works.map(w => {
+      for (const k in w.inherited) for (const r in w.inherited[k]) (w.touched[k] ??= {})[r] = true;
+      return { id: w.id, name: w.name, system: w.system, ...(w.lineup && { lineup: w.lineup }), formations: { ...w.data, touched: w.touched } };
+    });
+    ui.settings = await api('PUT', '/api/settings', { presets: list, activePreset: f.presetId });
+    // Открытый матч переходит на выбранный пресет (и его схему).
+    if (ui.match && ui.match.preset !== f.presetId) setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { preset: f.presetId, system: editPreset().system }));
+    ui.fEdit = null;
     modal('');
     recompute();
     toast('Расстановки сохранены — игроки на площадке встают по ним');
@@ -1851,6 +1927,9 @@ document.addEventListener('change', e => {
   if (k === 'system') call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { system: v })));
   if (k === 'trackSets') { ui.trackSets = v; store.set('trackSets', v); render(); }
   if (k === 'lsetter') ui.lineupDraft.setter = v;
+  if (k === 'fPreset') { ui.fEdit.presetId = v; bindPreset(); paintFormEditor(); }
+  if (k === 'fSystem') { editPreset().system = v; }
+  if (k === 'matchPreset') { const pr = presetById(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { preset: v, system: pr.system || ui.match.system }))); }
   if (k === 'eres') updateEvent(ui.edit, { res: v });
   if (k === 'ep') updateEvent(ui.edit, { p: v || null });
   if (k === 'etempo') updateEvent(ui.edit, { tempo: v });
@@ -1872,7 +1951,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (modalOpen()) {
-    if (e.key === 'Escape') modal('');
+    if (e.key === 'Escape') { modal(''); ui.fEdit = null; }
     if (e.key === 'Enter' && ui.lineupDraft?.order.length === 6 && $('modal').querySelector('[data-a=lstart]')) H.lstart();
     return;
   }

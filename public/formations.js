@@ -14,9 +14,9 @@ export const SITUATIONS = {
 // Стандартные позиции, если команда свои не задала.
 const BASE = {
   // Приём: задняя линия глубже, центральный у сетки, крайний передний помогает на приёме.
-  rec: { 1: { x: 7.3, y: 2.6 }, 6: { x: 4.5, y: 2.4 }, 5: { x: 1.7, y: 2.6 }, 4: { x: 1.5, y: 5.0 }, 3: { x: 4.1, y: 8.2 }, 2: { x: 7.7, y: 6.8 } },
+  rec: { 1: { x: 7.3, y: 2.6 }, 6: { x: 4.5, y: 2.4 }, 5: { x: 1.7, y: 2.6 }, 4: { x: 1.5, y: 5.0 }, 3: { x: 4.1, y: 8.2 }, 2: { x: 7.2, y: 7.3 } },
   // Связующий на приёме «прячется» у сетки и сразу выходит пасовать.
-  setterRec: { 1: { x: 7.7, y: 6.6 }, 6: { x: 5.4, y: 7.0 }, 5: { x: 2.8, y: 7.0 }, 2: { x: 6.4, y: 8.4 }, 3: { x: 5.2, y: 8.4 }, 4: { x: 2.8, y: 8.4 } },
+  setterRec: { 1: { x: 8.3, y: 6.1 }, 6: { x: 5.4, y: 7.0 }, 5: { x: 2.4, y: 6.6 }, 2: { x: 6.4, y: 8.4 }, 3: { x: 5.2, y: 8.4 }, 4: { x: 2.8, y: 8.4 } },
   serve: ZONE_SPOT,
   // Защита «углом назад»: задняя линия — равнобедренный треугольник, игрок 6-й зоны у лицевой линии.
   // По умолчанию — как блок по центру: центральный у сетки, крайние отошли, сзади треугольник.
@@ -28,6 +28,8 @@ export const SETTER_SPOT = { x: 6.2, y: 8.2 };
 
 export function defaultSpot(kind, rot, zone) {
   if (kind === 'rec' && zone === rot) return BASE.setterRec[zone];
+  // Р5: связующий из 5-й зоны прячется за игроком 4-й — тот стоит у сетки (иначе нарушение расстановки).
+  if (kind === 'rec' && rot === 5 && zone === 4) return { x: 1.4, y: 7.7 };
   if (kind === 'att') return zone === rot ? SETTER_SPOT : ATTACK[zone];
   return BASE[kind][zone];
 }
@@ -65,4 +67,17 @@ export function defenseLayout(base, block) {
   if (t.R) out[Rz] = t.R;
   out[b5] = t.b5; out[b6] = t.b6; out[b1] = t.b1;
   return { spots: out, blockers, side };
+}
+
+// ---------- Протокольная расстановка ----------
+// В момент подачи игроки должны стоять по порядку: в линии — слева направо 4·3·2 и 5·6·1,
+// каждый передний ближе к сетке, чем стоящий за ним задний (4–5, 3–6, 2–1). Подающий (зона 1 на нашей подаче) — вне правила.
+export function overlapIssues(tab, { server = false } = {}) {
+  const issues = [], bad = new Set();
+  const skip = z => server && z === 1;
+  const lr = (a, b) => { if (skip(a) || skip(b)) return; if (!(tab[a].x < tab[b].x)) { issues.push(`зона ${a} должна быть левее зоны ${b}`); bad.add(a); bad.add(b); } };
+  const fb = (f, b) => { if (skip(b)) return; if (!(tab[f].y > tab[b].y)) { issues.push(`зона ${f} должна быть ближе к сетке, чем зона ${b}`); bad.add(f); bad.add(b); } };
+  lr(4, 3); lr(3, 2); lr(5, 6); lr(6, 1);
+  fb(4, 5); fb(3, 6); fb(2, 1);
+  return { issues, bad };
 }
