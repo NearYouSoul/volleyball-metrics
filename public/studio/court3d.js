@@ -82,9 +82,10 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   scene.fog = new THREE.Fog(0x0b0c0e, 40, 75);
 
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
-  camera.position.set(0, 10.5, 15.5);
+  camera.position.set(0, 10.5, 16.5);
+  // Смотрим чуть ниже центра — наша половина целиком над панелью кнопок.
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0, 0);
+  controls.target.set(0, 0, 2.2);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.49;
   controls.minDistance = 6;
@@ -352,7 +353,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
 
   // ---------- Камера ----------
   const VIEWS = {
-    persp: { pos: [0, 10.5, 15.5], target: [0, 0, 0.5] },
+    persp: { pos: [0, 10.5, 16.5], target: [0, 0, 2.2] },
     top: { pos: [0, 27, 0.01], target: [0, 0, 0] },
     side: { pos: [17, 6.5, 0], target: [0, 1, 0] },
     behind: { pos: [0, 4.2, 14.5], target: [0, 1.6, -3] },
