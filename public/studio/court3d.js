@@ -58,6 +58,17 @@ export function arcPoints(from, to, y0, y1, apex, n = 40) {
   return pts;
 }
 
+// Очистка группы с освобождением памяти видеокарты: траектории и точки перерисовываются часто,
+// без dispose() за долгий разбор матча память бы только росла.
+function clearGroup(g) {
+  g.traverse(o => {
+    if (o === g) return;
+    o.geometry?.dispose();
+    if (o.material && !o.material.userData.shared) o.material.dispose();
+  });
+  g.clear();
+}
+
 export function createCourt3D(el, { onPick, onHover } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -197,16 +208,26 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
     return g;
   };
   function setPending({ from, to } = {}) {
-    marks.clear();
+    clearGroup(marks);
     if (from) marks.add(marker(from, COLORS.sky));
     if (to) marks.add(marker(to, COLORS.coral));
   }
   // Точки прошлых касаний: мелкие диски на полу.
+  const dotGeo = new THREE.CircleGeometry(0.11, 20);
+  const dotMats = new Map(); // один материал на цвет — точек бывают сотни
+  const dotMat = (color, opacity) => {
+    const k = `${color}:${opacity}`;
+    if (!dotMats.has(k)) { const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity }); m.userData.shared = true; dotMats.set(k, m); }
+    return dotMats.get(k);
+  };
+  let dotsKey = '';
   function setDots(list = []) {
-    dots.clear();
-    const geo = new THREE.CircleGeometry(0.11, 20);
+    const key = JSON.stringify(list);
+    if (key === dotsKey) return; // ничего не поменялось — не пересоздаём
+    dotsKey = key;
+    dots.clear(); // геометрия и материалы общие — их не освобождаем
     for (const d of list) {
-      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: d.color ?? COLORS.white, transparent: true, opacity: d.opacity ?? 0.7 }));
+      const m = new THREE.Mesh(dotGeo, dotMat(d.color ?? COLORS.white, d.opacity ?? 0.7));
       m.rotation.x = -Math.PI / 2;
       m.position.copy(toWorld(d)); m.position.y = 0.008;
       dots.add(m);
@@ -217,8 +238,12 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 24, 24), new THREE.MeshStandardMaterial({ color: 0xf6e7a1, roughness: 0.5 }));
   ball.castShadow = true; ball.visible = false; scene.add(ball);
   let flight = null;
+  let trailsKey = '';
   function setTrails(list = [], { animate = true } = {}) {
-    trails.clear();
+    const key = JSON.stringify(list);
+    if (key === trailsKey) return; // та же картинка — мяч продолжает лететь, а не начинает заново
+    trailsKey = key;
+    clearGroup(trails);
     const curves = [];
     for (const t of list) {
       const pts = arcPoints(t.from, t.to, t.y0 ?? 0.5, t.y1 ?? 0.1, t.apex ?? 3, 48);
