@@ -196,7 +196,7 @@ const court = createCourt3D($('court3d'), {
 
 const inCourtUs = p => p.x >= 0 && p.x <= 9 && p.y >= 0 && p.y < NET;
 const inCourtThem = p => p.x >= 0 && p.x <= 9 && p.y >= NET && p.y <= 18;
-const rallyKey = () => (ui.st?.set ? `${ui.st.set.n}:${ui.st.rally.no}:${ui.insertAt}` : '');
+const rallyKey = () => (ui.st?.set ? `${ui.st.set.n}:${ui.st.rally.no}` : '');
 const curH = () => ui.setH ?? TEMPOS[ui.tempo].h;
 const tempoOfH = h => (h < 3.6 ? 'q' : h < 5 ? 'f' : 'h');
 const SET_Q = { perfect: 'идеальный', good: 'хороший', poor: 'неудобный' };
