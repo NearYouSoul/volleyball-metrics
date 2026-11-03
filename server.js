@@ -62,13 +62,14 @@ const loadRefs = async () => ({ roster: await readJson(rosterFile, []), settings
 
 // В файле матча лежит копия состава на момент игры. Перед отдачей подставляем текущие
 // имена/номера игроков и название соперника — так переименование действует и на старые матчи.
-// Отметку «связующий» не трогаем: она должна остаться такой, какой была в том матче.
 // Игроков, добавленных в состав уже после начала матча, дописываем в конец — иначе их не выбрать.
 function hydrate(match, { roster, settings }) {
   const opp = settings.opponents.find(o => o.id === match.opponentId);
   const snapshot = match.roster.map(p => {
     const cur = roster.find(r => r.id === p.id);
-    return cur ? { ...p, num: cur.num, name: cur.name } : p;
+    // Роль — тоже текущая (поправили роль в настройках — матчи видят новую). Отметку «связующий» обновляем,
+    // только если у игрока задана роль; иначе оставляем, как была в матче.
+    return cur ? { ...p, num: cur.num, name: cur.name, ...(cur.role !== undefined && { role: cur.role, setter: cur.role === 's' }) } : p;
   });
   const added = roster.filter(r => !match.roster.some(p => p.id === r.id));
   return { ...match, opponent: opp?.name ?? match.opponent, roster: [...snapshot, ...added] };

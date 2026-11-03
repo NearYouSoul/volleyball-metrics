@@ -81,3 +81,32 @@ export function overlapIssues(tab, { server = false } = {}) {
   fb(4, 5); fb(3, 6); fb(2, 1);
   return { issues, bad };
 }
+
+// ---------- Атака по ролям ----------
+// Игровая расстановка в атаке: в передней линии доигровщик — слева (4), центральный — в центре (3),
+// диагональный — справа (2); в задней — доигровщик на пайп (6), диагональный — задняя атака из 1-й,
+// центральный — страховка в 5-й. Связующий — к сетке (в том числе из задней линии).
+// Если ролей нет или они повторяются — оставшиеся места занимают по зонам слева направо.
+const FRONT_SPOT = { L: { x: 0.7, y: 5.6 }, M: { x: 4.0, y: 6.5 }, R: { x: 8.3, y: 5.6 } };
+const BACK_SPOT = { L: { x: 1.6, y: 2.4 }, M: { x: 4.5, y: 3.0 }, R: { x: 7.6, y: 3.0 } };
+const FRONT_PREF = { oh: 'L', mb: 'M', opp: 'R', s: 'R' };
+const BACK_PREF = { oh: 'M', opp: 'R', mb: 'L', s: 'R', l: 'L' };
+// players: [{ id, zone, role, front }]; setterId — кто пасует. Возвращает { id → точка }.
+export function attackByRole(players, setterId) {
+  const out = {};
+  for (const [line, spots, pref] of [[true, FRONT_SPOT, FRONT_PREF], [false, BACK_SPOT, BACK_PREF]]) {
+    const ps = players.filter(p => p.front === line && p.id !== setterId);
+    const free = new Set(Object.keys(spots));
+    const left = [];
+    for (const p of ps) {
+      const want = pref[p.role];
+      if (want && free.has(want)) { out[p.id] = spots[want]; free.delete(want); } else left.push(p);
+    }
+    // Остальные — по своим зонам слева направо на свободные места.
+    const order = ['L', 'M', 'R'].filter(k => free.has(k));
+    const zx = z => ({ 4: 0, 3: 1, 2: 2, 5: 0, 6: 1, 1: 2 })[z];
+    left.sort((a, b) => zx(a.zone) - zx(b.zone)).forEach((p, i) => { out[p.id] = spots[order[i]] ?? spots.M; });
+  }
+  if (setterId) out[setterId] = SETTER_SPOT;
+  return out;
+}

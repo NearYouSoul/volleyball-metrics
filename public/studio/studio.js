@@ -5,7 +5,7 @@ import { replay, playerName, LABELS, ACTIONS, SKILLS } from '../engine.js';
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
-import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide, overlapIssues } from '../formations.js';
+import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide, overlapIssues, attackByRole } from '../formations.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -296,10 +296,13 @@ function formation(c) {
   const stage = c?.stage === 'await' ? c.base : c?.stage;
   const kind = stage === 'serve' ? 'serve' : stage === 'rec' ? 'rec' : stage === 'their' ? 'def' : stage ? 'att' : 'serve';
   const rot = st.rally.rot, F = FORM();
+  // Атака: настроенная в редакторе для этой расстановки — по ней; иначе — по ролям игроков.
+  const byRole = kind === 'att' && !F.touched?.att?.[rot]
+    ? attackByRole(st.set.lineup.map(id => ({ id, zone: zoneOfId(id), role: roleOf(person(id)), front: isFrontZone(zoneOfId(id)) })), gs) : null;
   for (const id of st.set.lineup) {
     const z = zoneOfId(id);
     // Атака: из расстановок команды; пасующий (если пасует не тот, кто в зоне связующего, — например, в 4-2) — к сетке.
-    let s = kind === 'att' ? (id === gs && z !== rot ? SETTER_SPOT : spotFor(F, 'att', rot, z)) : spotFor(F, kind, rot, z);
+    let s = kind === 'att' ? (byRole ? byRole[id] : id === gs && z !== rot ? SETTER_SPOT : spotFor(F, 'att', rot, z)) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st.rally.server === id) s = { x: 7.6, y: -0.9 };
     out[id] = s;
   }
@@ -369,6 +372,13 @@ function moveTo(id, p) { if (id && p) ui.moved[id] = { x: p.x, y: p.y }; }
 // Движение игрока на 3D: приём, пас, удар, блок, подача.
 const ACT_OF = { rec: 'rec', dig: 'dig', set: 'set', att: 'att', blk: 'blk', serve: 'serve' };
 function doAct(id, type) { if (id && type) ui.acts[id] = { type, key: Math.random() }; }
+
+// Кто бьёт с этой точки: за трёхметровой — только задняя линия, у сетки — только передняя (кроме пасующего).
+function attackerFor(p, setter) {
+  const front = frontRow(), back = ui.st.set.lineup.filter(id => !front.includes(id));
+  const pool = (p.y >= NET - 3 ? front : back).filter(id => id !== setter);
+  return nearest(p, { only: pool.length ? pool : null, exclude: [setter] });
+}
 
 // Ждём подтверждения игрока: точка уже стоит, вероятный игрок пульсирует, клик по фишке — завершить шаг.
 function awaitPlayer(kind, point, suggest, extra = {}) {
@@ -478,7 +488,7 @@ function stepPoint(c, p, right, hit) {
     }
     case 'set': {
       if (p.y >= NET) return attackLanding(p, right, { p: c.p, from: c.from }); // скидка вторым касанием
-      return awaitPlayer('attacker', p, nearest(p, { exclude: [c.p] }), { set: c });
+      return awaitPlayer('attacker', p, attackerFor(p, c.p), { set: c });
     }
     case 'att': {
       if (hit?.hands === 'them') return blockMenu(p, c);
@@ -491,12 +501,31 @@ function stepPoint(c, p, right, hit) {
   }
 }
 
+// Атака на их половину: один клик в площадке — мяч в игре, двойной — забили в эту точку, клик за линиями — аут.
+// Одиночный клик ждёт ~0,3 с, не будет ли второго; ПКМ — меню со всеми вариантами.
+let landing = null;
+const DBL_MS = 300;
 function attackLanding(p, right, c) {
-  ui.draft = null;
   const ev = { skill: 'att', p: c.p, from: c.from, to: p, ...(c.t != null && { vt: c.t }) };
-  if (!inCourtThem(p)) return postAct({ ...ev, res: 'error' });
-  postAct({ ...ev, res: right ? 'play' : 'kill' });
+  if (right) {
+    return openMenu(p, 0, [
+      ['Забил (очко)', 'g', () => postAct({ ...ev, res: 'kill' })],
+      ['В игре — подняли', 'n', () => postAct({ ...ev, res: 'play' })],
+      ['Аут / сетка', 'r', () => postAct({ ...ev, res: 'error' })],
+    ], 'Атака');
+  }
+  if (!inCourtThem(p)) { clearLanding(); ui.draft = null; return postAct({ ...ev, res: 'error' }); }
+  // Второй клик рядом с первым и быстро — это двойной: очко.
+  if (landing && Math.hypot(landing.p.x - p.x, landing.p.y - p.y) < 1.2) {
+    const first = landing; clearLanding();
+    ui.draft = null;
+    return postAct({ ...first.ev, res: 'kill' });
+  }
+  clearLanding();
+  landing = { p, ev, timer: setTimeout(() => { const l = landing; landing = null; ui.draft = null; postAct({ ...l.ev, res: 'play' }); }, DBL_MS) };
+  court.setPending({ to: p });
 }
+function clearLanding() { if (landing) { clearTimeout(landing.timer); landing = null; } }
 function blockMenu(p, c) {
   const at = { x: p.x, y: NET + 0.1 };
   openMenu(at, 2.9, [
@@ -665,7 +694,7 @@ function paintPreview() {
 function liveCandidate(m) {
   const c = ctx();
   if (!m || !c) return null;
-  if (c.stage === 'set' && m.y < NET) return nearest(m, { exclude: [c.p] });
+  if (c.stage === 'set' && m.y < NET) return attackerFor(m, c.p);
   if (c.stage === 'touch2' && m.y < NET) { const gs = guessedSetter(); return gs && gs !== c.touch.p ? gs : nearest(m, { exclude: [c.touch.p] }); }
   if ((c.stage === 'rec' || c.stage === 'their' || c.stage === 'free') && m.y < NET && inCourtUs(m)) return nearest(m);
   return null;
@@ -1243,7 +1272,7 @@ function paintFormEditor(fromRot = null) {
     const z = slotZone(sl, f.rot, ms), p = tab[z];
     const o = oldTab ? oldTab[slotZone(sl, fromRot, ms)] : p;
     const id = start?.[sl], pl = id ? person(id) : null;
-    const role = pl ? ROLES[roleOf(pl)]?.short ?? '' : sl === ms ? 'С' : '';
+    const role = pl ? ROLES[roleOf(pl)]?.short ?? '' : sl === ms ? 'СВ' : '';
     return `<g class="ftok ${z === f.rot ? 'setter' : ''} ${legal?.bad.has(z) ? 'bad' : ''}" data-z="${z}" data-tx="${p.x} ${sy(p.y)}" style="transform: translate(${o.x}px, ${sy(o.y)}px)">
       <circle r=".46"/><text class="n" y=".15">${pl ? esc(pl.num || pl.name.slice(0, 2)) : z}</text>
       <text class="r" y="-.62">${role ? role + ' · ' : ''}зона ${z}</text></g>`;
@@ -1491,9 +1520,11 @@ function replayPlayers(r, t) {
     const pt = pl.skill === 'set' ? pl.from : pl.to;
     if (pl.p && pt) moved[pl.p] = pt;
   }
+  const gsR = lineup.find(id => setters.has(id) && isFrontZone(zones[lineup.indexOf(id)])) ?? lineup.find(id => setters.has(id));
+  const attRole = attackByRole(lineup.map((id, k) => ({ id, zone: zones[k], role: roleOf(person(id)), front: isFrontZone(zones[k]) })), gsR);
   return lineup.map((id, k) => {
     const z = zones[k], p = person(id);
-    let spot = kind === 'att' ? (setters.has(id) ? SETTER_SPOT : ATTACK[z]) : spotFor(F, kind, rot, z);
+    let spot = kind === 'att' ? (F.touched?.att?.[rot] ? spotFor(F, 'att', rot, z) : attRole[id]) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st0.rally.server === id && !last) spot = { x: 7.6, y: -0.9 };
     return { id, label: p.num || (p.name || '?').slice(0, 2), spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
   });

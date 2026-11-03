@@ -341,11 +341,11 @@ const COLS = [
   ['points', 'Очки', p => totals(p).points], ['diff', '+/−', p => totals(p).diff],
   ['srv', 'Подач', p => p.serve.tot], ['ace', 'Эйс', p => p.serve.ace], ['serr', 'Ош', p => p.serve.err],
   ['rec', 'Приём', p => p.rec.tot], ['rr', 'Рейтинг', p => recRating(p.rec)], ['rpos', 'Позитив', p => (p.rec.tot ? (p.rec.pp + p.rec.pm) / p.rec.tot : null)], ['rerr', 'Ош', p => p.rec.err],
-  ['att', 'Атак', p => p.att.tot], ['kill', 'Очки', p => p.att.kill + p.att.bo], ['aerr', 'Ош+Бл', p => p.att.err + p.att.blk], ['kp', 'Очки %', p => (p.att.tot ? (p.att.kill + p.att.bo) / p.att.tot : null)], ['eff', 'Эфф', p => attEff(p.att)],
+  ['att', 'Атак', p => p.att.tot], ['kill', 'Очки', p => p.att.kill + p.att.bo], ['aplay', 'В игре', p => p.att.tot - p.att.kill - p.att.bo - p.att.err - p.att.blk], ['aerr', 'Ош+Бл', p => p.att.err + p.att.blk], ['kp', 'Реализ.', p => (p.att.tot ? (p.att.kill + p.att.bo) / p.att.tot : null)], ['eff', 'Эфф', p => attEff(p.att)],
   ['set', 'Пасов', p => p.set.tot], ['setq', 'Хорош.', p => (p.set.tot ? (p.set.perfect + p.set.good) / p.set.tot : null)],
   ['blk', 'Блок', p => p.blk.point], ['dig', 'Защита', p => p.dig.tot], ['dplus', 'Подн.', p => (p.dig.tot ? (p.dig.plus + p.dig.minus) / p.dig.tot : null)],
 ];
-const GROUPS = [['Итог', 2], ['Подача', 3], ['Приём', 4], ['Атака', 5], ['Пас', 2], ['Защита', 3]];
+const GROUPS = [['Итог', 2], ['Подача', 3], ['Приём', 4], ['Атака', 6], ['Пас', 2], ['Защита', 3]];
 const fmtCol = (k, v) => {
   if (v == null) return '–';
   if (k === 'rr') return v.toFixed(2);
