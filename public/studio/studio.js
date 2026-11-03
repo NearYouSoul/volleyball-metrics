@@ -2,9 +2,10 @@
 // Состояние матча, как и везде, вычисляет engine.js из списка событий на сервере;
 // здесь — только интерфейс: видео, 3D-площадка, ввод касаний, правка и вставка событий.
 import { replay, playerName, LABELS, ACTIONS, SKILLS } from '../engine.js';
-import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET } from '../court.js';
+import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
+import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT } from '../formations.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -243,29 +244,17 @@ const frontRow = () => ui.st.set.lineup.filter(id => isFrontZone(zoneOfId(id)));
 const isFrontZone = z => z >= 2 && z <= 4;
 
 // ---------- Расстановка по ситуации ----------
-// Где стоят игроки, пока их не «увёл» мяч (ui.moved). Позиции по роли и зоне — как играют на самом деле.
-const SPOTS = {
-  // Приём подачи: задняя линия глубже, центральный у сетки, связующий «прячется» у сетки и готов выйти.
-  rec: { 1: { x: 7.3, y: 2.6 }, 6: { x: 4.5, y: 2.4 }, 5: { x: 1.7, y: 2.6 }, 4: { x: 1.5, y: 5.0 }, 3: { x: 4.1, y: 8.2 }, 2: { x: 7.7, y: 6.8 } },
-  setterHideRec: { 1: { x: 7.7, y: 6.6 }, 6: { x: 5.4, y: 7.0 }, 5: { x: 2.8, y: 7.0 }, 2: { x: 6.4, y: 8.4 }, 3: { x: 5.2, y: 8.4 }, 4: { x: 2.8, y: 8.4 } },
-  // Оборона «углом назад»: задняя линия — равнобедренный треугольник, игрок 6-й зоны — у лицевой.
-  def: { 5: { x: 1.3, y: 3.6 }, 1: { x: 7.7, y: 3.6 }, 6: { x: 4.5, y: 0.9 }, 4: { x: 1.4, y: 7.9 }, 3: { x: 4.5, y: 8.2 }, 2: { x: 7.6, y: 7.9 } },
-  // Атака: нападающие на разбеге, связующий у сетки, задняя линия — на пайп / заднюю атаку и страховку.
-  att: { 4: { x: 0.7, y: 5.6 }, 3: { x: 4.0, y: 6.5 }, 2: { x: 8.3, y: 5.6 }, 6: { x: 4.5, y: 3.0 }, 1: { x: 7.6, y: 3.0 }, 5: { x: 1.6, y: 2.4 } },
-  serve: ZONE_SPOT,
-};
-const SETTER_SPOT = { x: 6.2, y: 8.2 };
-
+// Подача, приём и защита — из расстановок команды (редактор «Расстановки», по умолчанию — стандартные).
+// Атака одинаковая: нападающие на разбеге, связующий (в том числе из задней линии) выходит к сетке.
 function formation(c) {
   const st = ui.st, out = {};
   const gs = guessedSetter();
   const stage = c?.stage === 'await' ? c.base : c?.stage;
   const kind = stage === 'serve' ? 'serve' : stage === 'rec' ? 'rec' : stage === 'their' ? 'def' : stage ? 'att' : 'serve';
+  const rot = st.rally.rot, F = ui.settings.formations;
   for (const id of st.set.lineup) {
     const z = zoneOfId(id);
-    let s = SPOTS[kind][z];
-    if (kind === 'rec' && id === gs) s = SPOTS.setterHideRec[z];
-    if (kind === 'att' && id === gs) s = SETTER_SPOT; // связующий из задней линии выходит вперёд
+    let s = kind === 'att' ? (id === gs ? SETTER_SPOT : ATTACK[z]) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st.rally.server === id) s = { x: 7.6, y: -0.9 };
     out[id] = s;
   }
@@ -293,7 +282,7 @@ function nearest(p, { exclude = [], only = null } = {}) {
 // Наш блок на удар соперника: двое из передней линии ближе всего к месту удара.
 function ourBlockers(origin) {
   if (!origin || !ui.st?.set) return [];
-  const base = id => SPOTS.def[zoneOfId(id)];
+  const base = id => spotFor(ui.settings.formations, 'def', ui.st.rally.rot, zoneOfId(id));
   const fr = frontRow().sort((a, b) => Math.abs(base(a).x - origin.x) - Math.abs(base(b).x - origin.x)).slice(0, 2);
   return fr.map(id => ({ id, x: Math.max(0.5, Math.min(8.5, base(id).x * 0.4 + origin.x * 0.6)) }));
 }
@@ -665,7 +654,7 @@ function tile(id, zone, extra = '') {
   const cls = [ui.sel === id && 'on', ui.sub?.out === id && 'out'].filter(Boolean).join(' ');
   return `<button class="ptile ${cls}" data-a="${ui.sub ? 'subOut' : 'sel'}" data-id="${id}" ${extra}>
     <span class="z">${zone}</span>${tags.join('')}
-    <span class="n">${esc(p.num || p.name)}</span>${p.num ? `<span class="nm">${esc(p.name)}</span>` : ''}</button>`;
+    <span class="n">${esc(p.num || p.name)}</span>${p.num ? `<span class="nm">${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</span>` : ''}</button>`;
 }
 
 function paintDock() {
@@ -864,6 +853,8 @@ function sideMatch() {
     </div>` : ''}
     <h3>Матчи <span class="grow"></span><button class="btn sm" data-a="newMatch">${icon('i-plus')}Новый</button></h3>
     <div class="mlist">${list || '<p class="muted">Матчей пока нет.</p>'}</div>
+    <h3>Расстановки команды</h3>
+    <p class="muted">Как команда стоит на приёме, на своей подаче и в защите — для каждой из Р1–Р6. <button class="btn sm" data-a="formEditor" style="margin-top:8px">Настроить расстановки</button></p>
     <h3>Зоны доводки</h3>
     <p class="muted">Оценка приёма и защиты ставится сама — по точке, куда мяч пришёл к пасующему. <button class="btn sm" data-a="zonesEditor" style="margin-top:8px">Настроить зоны ++ / +− / +</button></p>
     <h3>Команда</h3>
@@ -1071,6 +1062,66 @@ function openZonesEditor() {
 }
 function paintZones() {
   document.querySelectorAll('#zcells .zc').forEach(el => { el.setAttribute('fill', GRADES[ui.zEdit.z[+el.dataset.i]].color); });
+}
+
+
+// ---------- Редактор расстановок ----------
+// Как команда стоит в каждой из шести расстановок: на приёме, на своей подаче и в защите.
+// Позиции задаются для зоны (в Рn связующий в зоне n), поэтому подходят к любому составу.
+function refLineup(rot) {
+  // Чтобы на фишках были номера: берём стартовый состав последней партии этого матча.
+  const set = ui.st?.sets.at(-1);
+  if (!set || set.mainSlot < 0) return null;
+  const z1 = [0, 1, 2, 3, 4, 5].find(k => zoneOfSlot(set.mainSlot, k) === rot);
+  const zones = slotZones(z1);
+  return Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, set.start[zones.indexOf(z)]]));
+}
+function openFormEditor() {
+  const data = {};
+  for (const k of Object.keys(SITUATIONS)) { data[k] = {}; for (let r = 1; r <= 6; r++) data[k][r] = tableFor(ui.settings.formations, k, r); }
+  ui.fEdit = { kind: 'rec', rot: ui.st?.rally?.rot ?? 1, data };
+  paintFormEditor();
+}
+function paintFormEditor() {
+  const f = ui.fEdit, tab = f.data[f.kind][f.rot], ref = refLineup(f.rot);
+  const sy = y => 9 - y; // сетка сверху
+  const tokens = [1, 2, 3, 4, 5, 6].map(z => {
+    const p = tab[z], id = ref?.[z], pl = id ? person(id) : null;
+    const role = pl ? ROLES[roleOf(pl)]?.short ?? '' : z === f.rot ? 'С' : '';
+    return `<g class="ftok ${z === f.rot ? 'setter' : ''}" data-z="${z}" transform="translate(${p.x} ${sy(p.y)})">
+      <circle r=".46"/><text class="n" y=".15">${pl ? esc(pl.num || pl.name.slice(0, 2)) : z}</text>
+      <text class="r" y="-.62">${role ? role + ' · ' : ''}зона ${z}</text></g>`;
+  }).join('');
+  const ghosts = [1, 2, 3, 4, 5, 6].map(z => { const b = ZONE_SPOT[z]; return `<text class="fz" x="${b.x}" y="${sy(b.y) + 0.15}">${z}</text>`; }).join('');
+  modal(`<h2>Расстановки команды</h2>
+    <p>Перетащите игроков: как команда стоит в каждой расстановке. В <b>Р${f.rot}</b> связующий — в зоне ${f.rot}.
+      Атака одинаковая для всех расстановок: нападающие разбегаются, связующий выходит к сетке — это программа делает сама.</p>
+    <div class="fbar"><div class="seg">${Object.entries(SITUATIONS).map(([k, v]) => `<button class="${f.kind === k ? 'on' : ''}" data-a="fKind" data-v="${k}">${v}</button>`).join('')}</div>
+      <div class="seg">${[1, 2, 3, 4, 5, 6].map(r => `<button class="${f.rot === r ? 'on' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}</div></div>
+    <div class="zwrap"><svg id="fsvg" viewBox="-1.6 -1.1 12.2 13.4">
+      <rect x="0" y="0" width="9" height="9" fill="#1d3a57"/>
+      <rect x="0" y="0" width="9" height="3" fill="rgb(255 255 255 / .04)"/>
+      <line x1="3" y1="0" x2="3" y2="9" class="fl"/><line x1="6" y1="0" x2="6" y2="9" class="fl"/>
+      <line x1="0" y1="3" x2="9" y2="3" stroke="#e9eaec" stroke-width=".05"/>
+      <rect x="0" y="0" width="9" height="9" fill="none" stroke="#e9eaec" stroke-width=".06"/>
+      <line x1="-0.5" y1="0" x2="9.5" y2="0" stroke="#fff" stroke-width=".14"/>
+      <text x="4.5" y="-0.45" class="fcap">сетка</text><text x="4.5" y="10.9" class="fcap">зона подачи</text>
+      ${ghosts}${tokens}
+    </svg></div>
+    <div class="foot"><button class="btn ghost" data-a="fReset">Сбросить Р${f.rot}</button><button class="btn ghost" data-a="fCopy">Копировать во все Р1–Р6</button><span class="grow"></span>
+      <button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="fSave">Сохранить</button></div>`);
+  const svg = $('fsvg');
+  let drag = null;
+  const pt = e => { const q = svg.createSVGPoint(); q.x = e.clientX; q.y = e.clientY; return q.matrixTransform(svg.getScreenCTM().inverse()); };
+  svg.onpointerdown = e => { const g = e.target.closest('.ftok'); if (!g) return; drag = +g.dataset.z; svg.setPointerCapture(e.pointerId); };
+  svg.onpointermove = e => {
+    if (!drag) return;
+    const q = pt(e);
+    const x = Math.max(-1, Math.min(10, Math.round(q.x * 10) / 10)), y = Math.max(-2.5, Math.min(9, Math.round((9 - q.y) * 10) / 10));
+    tab[drag] = { x, y };
+    svg.querySelector(`.ftok[data-z="${drag}"]`).setAttribute('transform', `translate(${x} ${9 - y})`);
+  };
+  svg.onpointerup = () => { drag = null; };
 }
 
 // ---------- Видео ----------
@@ -1325,6 +1376,22 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  formEditor: () => openFormEditor(),
+  fKind: d => { ui.fEdit.kind = d.v; paintFormEditor(); },
+  fRot: d => { ui.fEdit.rot = +d.v; paintFormEditor(); },
+  fReset: () => { const f = ui.fEdit; f.data[f.kind][f.rot] = Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, { ...defaultSpot(f.kind, f.rot, z) }])); paintFormEditor(); },
+  fCopy: () => {
+    const f = ui.fEdit, src = f.data[f.kind][f.rot];
+    if (!confirm(`Поставить «${SITUATIONS[f.kind]}» во всех расстановках как в Р${f.rot}? Позиции считаются по зонам.`)) return;
+    for (let r = 1; r <= 6; r++) f.data[f.kind][r] = JSON.parse(JSON.stringify(src));
+    paintFormEditor();
+  },
+  fSave: () => call(async () => {
+    ui.settings = await api('PUT', '/api/settings', { formations: ui.fEdit.data });
+    modal('');
+    recompute();
+    toast('Расстановки сохранены — игроки на площадке встают по ним');
+  }),
   cancelStep: () => { closeMenu(); ui.draft = ui.draft?.await ? ui.draft.await.prev : null; ui.setH = null; render(); },
   confirmSuggest: () => { const c = ctx(); if (c?.stage === 'await') confirmPlayer(c, ui.hoverPid ?? c.suggest); },
   setQ: d => setQuality(d.v),

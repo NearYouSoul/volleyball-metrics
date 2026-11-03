@@ -418,3 +418,15 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
   .court-bar .kbd, .court-bar .opt, .court-bar .hv { display: none; }
   .court-bar .cb { padding: 0 7px; }
 }
+
+/* Редактор расстановок */
+.fbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+#fsvg { width: min(100%, 470px); height: auto; touch-action: none; user-select: none; }
+#fsvg .fl { stroke: rgb(255 255 255 / .14); stroke-width: .03; stroke-dasharray: .15 .15; }
+#fsvg .fcap { font: 500 .38px var(--font); fill: var(--smoke); text-anchor: middle; }
+#fsvg .fz { font: 600 .9px var(--font); fill: rgb(255 255 255 / .07); text-anchor: middle; }
+#fsvg .ftok { cursor: grab; }
+#fsvg .ftok circle { fill: #e9eaec; stroke: #111215; stroke-width: .06; }
+#fsvg .ftok.setter circle { fill: #f0c85a; }
+#fsvg .ftok .n { font: 700 .44px var(--font); fill: #15161a; text-anchor: middle; pointer-events: none; }
+#fsvg .ftok .r { font: 600 .3px var(--font); fill: #e9eaec; text-anchor: middle; pointer-events: none; paint-order: stroke; stroke: #111215; stroke-width: .08px; }

@@ -1,7 +1,7 @@
 // Пульт: экраны «Меню», «Состав», «Порядок подачи», «Матч».
 // Всё состояние матча вычисляет engine.js из списка событий, который хранится на сервере.
 import { replay, playerName, LABELS } from './engine.js';
-import { SYSTEMS } from './court.js';
+import { SYSTEMS, ROLES, roleOf } from './court.js';
 
 const $app = document.getElementById('app');
 const ui = { view: 'home', matches: [], roster: [], settings: { teamName: 'Мы', opponents: [] }, match: null, st: null, sel: null, sub: null, lineup: [], weServe: true, busy: false };
@@ -96,13 +96,15 @@ function viewSettings() {
     <p class="hint">Схема подсказывает, кто пасует, если пас не отмечен: в 4-2 — связующий из передней линии, в гибриде — основной, если он на площадке.
       Для новых матчей; у начатых меняется в студии.</p>
     <h2>Игроки</h2>
-    <p class="hint">«Связ.» — связующий. Он подставляется в статистику связок автоматически, когда стоит на площадке.
+    <p class="hint">Роль: связующий, диагональный, доигровщик, центральный, либеро. Связующий подставляется в статистику связок автоматически, когда стоит на площадке.
       Имена можно менять — статистика старых матчей сохранится.</p>
     ${ui.roster.map((p, i) => `
       <div class="rost">
         <input type="number" inputmode="numeric" value="${esc(p.num)}" data-list="roster" data-i="${i}" data-k="num" placeholder="№">
         <input value="${esc(p.name)}" data-list="roster" data-i="${i}" data-k="name" placeholder="Имя">
-        <label><input type="checkbox" data-list="roster" data-i="${i}" data-k="setter" ${p.setter ? 'checked' : ''}>Связ.</label>
+        <select data-list="roster" data-i="${i}" data-k="role" style="border-radius:8px;background:rgb(255 255 255 / .05);color:#fff;border:0;padding:10px 4px;font:inherit;font-size:13px">
+          <option value="">Роль</option>${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${roleOf(p) === k ? 'selected' : ''}>${r.name}</option>`).join('')}
+        </select>
         <button data-a="delRow" data-list="roster" data-i="${i}">✕</button>
       </div>`).join('')}
     <div class="row"><button data-a="addPlayer">+ Игрок</button></div>
@@ -313,7 +315,7 @@ const handlers = {
     if (!confirm(`Удалить матч с «${m.opponent}»?`)) return;
     call(async () => { await api('DELETE', `/api/matches/${d.id}`); await goHome(); });
   },
-  addPlayer: () => { ui.roster.push({ id: newId(), num: '', name: '', setter: false }); render(); },
+  addPlayer: () => { ui.roster.push({ id: newId(), num: '', name: '', role: '', setter: false }); render(); },
   addOpponent: () => { ui.settings.opponents.push({ id: newId(), name: '' }); render(); },
   delRow: d => {
     const list = d.list === 'roster' ? ui.roster : ui.settings.opponents;
@@ -321,7 +323,8 @@ const handlers = {
     render();
   },
   saveSettings: () => call(async () => {
-    const roster = ui.roster.filter(p => p.num !== '' || p.name.trim()).map(p => ({ ...p, num: Number(p.num), name: p.name.trim() }));
+    // «Связующий» в движке — по роли; галочку оставляем для совместимости со старыми матчами.
+    const roster = ui.roster.filter(p => p.num !== '' || p.name.trim()).map(p => ({ ...p, num: Number(p.num), name: p.name.trim(), role: roleOf(p), setter: roleOf(p) === 's' }));
     const opponents = ui.settings.opponents.filter(o => o.name.trim()).map(o => ({ ...o, name: o.name.trim() }));
     const settings = { teamName: ui.settings.teamName.trim() || 'Мы', opponents, system: ui.settings.system || '5-1' };
     [ui.roster, ui.settings] = await Promise.all([api('PUT', '/api/roster', roster), api('PUT', '/api/settings', settings)]);

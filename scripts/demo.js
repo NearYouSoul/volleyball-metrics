@@ -23,14 +23,14 @@ const pick = (arr, w) => {
 const jitter = (p, s = 0.9) => ({ x: +(p.x + (rnd() - 0.5) * 2 * s).toFixed(2), y: +(p.y + (rnd() - 0.5) * 2 * s).toFixed(2) });
 
 const roster = [
-  { id: 'p01', num: 7, name: 'Андрей', setter: true },
-  { id: 'p02', num: 11, name: 'Максим', setter: false },
-  { id: 'p03', num: 3, name: 'Илья', setter: false },
-  { id: 'p04', num: 14, name: 'Дима', setter: false },
-  { id: 'p05', num: 9, name: 'Саша', setter: false },
-  { id: 'p06', num: 5, name: 'Костя', setter: false },
-  { id: 'p07', num: 1, name: 'Женя', setter: true },
-  { id: 'p08', num: 18, name: 'Рома', setter: false },
+  { id: 'p01', num: 7, name: 'Андрей', role: 's', setter: true },
+  { id: 'p02', num: 11, name: 'Максим', role: 'oh', setter: false },
+  { id: 'p03', num: 3, name: 'Илья', role: 'mb', setter: false },
+  { id: 'p04', num: 14, name: 'Дима', role: 'opp', setter: false },
+  { id: 'p05', num: 9, name: 'Саша', role: 'oh', setter: false },
+  { id: 'p06', num: 5, name: 'Костя', role: 'mb', setter: false },
+  { id: 'p07', num: 1, name: 'Женя', role: 's', setter: true },
+  { id: 'p08', num: 18, name: 'Рома', role: 'oh', setter: false },
 ];
 const opponents = [{ id: 'o1', name: 'Буревестник' }, { id: 'o2', name: 'Северные' }, { id: 'o3', name: 'Тайфун' }];
 // Порядок подачи: связующий 7, доигровщик 11, центр 3, диагональ 14, доигровщик 9, центр 5.
