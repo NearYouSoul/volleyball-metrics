@@ -430,3 +430,28 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 #fsvg .ftok.setter circle { fill: #f0c85a; }
 #fsvg .ftok .n { font: 700 .44px var(--font); fill: #15161a; text-anchor: middle; pointer-events: none; }
 #fsvg .ftok .r { font: 600 .3px var(--font); fill: #e9eaec; text-anchor: middle; pointer-events: none; paint-order: stroke; stroke: #111215; stroke-width: .08px; }
+
+/* Синхронизация с видео */
+.sync-btn { height: 30px; padding: 0 11px; border-radius: 8px; background: var(--well); color: var(--ash); font-size: 12.5px; font-weight: 600; box-shadow: var(--key); margin-left: 6px; }
+.sync-btn.on { background: var(--sky); color: #08121f; box-shadow: none; }
+#loopSeg { display: none; }
+#loopSeg.on { display: inline-flex; }
+.sync-hud { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; pointer-events: none; }
+.sync-hud span { background: rgb(99 161 255 / .9); color: #08121f; padding: 5px 10px; border-radius: 7px; font-size: 12.5px; font-weight: 600; }
+.sync-hud span.ff { background: var(--amber); color: #1a1406; }
+.sync-hud span.frz { background: #e9eaec; color: #15161a; }
+
+/* История по розыгрышам */
+.evseg { display: flex; margin-bottom: 8px; }
+.evseg button { flex: 1; }
+.rl { display: grid; grid-template-columns: 44px 44px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px; border-radius: 8px; cursor: pointer; border-left: 3px solid transparent; }
+.rl:hover { background: var(--well); }
+.rl.sel { background: var(--raise); box-shadow: var(--key); }
+.rl.us { border-left-color: var(--mint); } .rl.them { border-left-color: var(--coral); } .rl.open { border-left-color: var(--amber); }
+.rl .t { font: 12px var(--mono); color: var(--smoke); padding-top: 1px; }
+.rl .t.none { opacity: .4; }
+.rl .sc { font: 600 13px var(--mono); color: var(--text); }
+.rl .body { font-size: 12.5px; color: var(--ash); min-width: 0; }
+.rl .body b { font-weight: 600; color: var(--text); }
+.rl.us .body b { color: var(--mint); } .rl.them .body b { color: var(--coral); }
+.rl .body small { display: block; margin-top: 2px; color: var(--smoke); font-size: 11.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

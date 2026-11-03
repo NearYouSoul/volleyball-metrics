@@ -157,26 +157,103 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
 
   // ---------- Игроки ----------
   const players = new Map(); // id → { group, target }
+  // Игрок — стилизованная фигура: ноги, корпус в майке, руки, голова; номер над головой.
+  // Двигается кодом: стойка, бег, приём, пас, нападающий удар, блок, подача.
+  const G = {
+    leg: new THREE.CapsuleGeometry(0.075, 0.68, 4, 10), shorts: new THREE.CylinderGeometry(0.2, 0.18, 0.24, 14),
+    torso: new THREE.CapsuleGeometry(0.17, 0.36, 4, 14), head: new THREE.SphereGeometry(0.115, 18, 14),
+    arm: new THREE.CapsuleGeometry(0.048, 0.46, 4, 8), hit: new THREE.CylinderGeometry(0.36, 0.36, 2.0, 10),
+  };
+  const MAT = {
+    skin: new THREE.MeshStandardMaterial({ color: 0xd9a77f, roughness: 0.65 }),
+    shorts: new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.8 }),
+    hit: new THREE.MeshBasicMaterial({ visible: false }),
+  };
+  for (const m of Object.values(MAT)) m.userData.shared = true;
   function playerToken(p) {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1.5, 24), new THREE.MeshStandardMaterial({ color: p.color ?? 0xe6e6e6, roughness: 0.6 }));
-    body.position.y = 0.75; body.castShadow = true;
-    body.userData.pid = p.id; // по нему клик попадает в игрока
-    g.add(body);
+    const hit = new THREE.Mesh(G.hit, MAT.hit); // невидимый «корпус» для клика
+    hit.position.y = 1.0; hit.userData.pid = p.id;
+    g.add(hit);
+    const jersey = new THREE.MeshStandardMaterial({ color: 0xe9eaec, roughness: 0.55 });
+    const fig = new THREE.Group(); g.add(fig);
+    const hips = new THREE.Group(); hips.position.y = 0.9; fig.add(hips);
+    const shorts = new THREE.Mesh(G.shorts, MAT.shorts); shorts.position.y = 0.02; shorts.castShadow = true; hips.add(shorts);
+    const leg = side => {
+      const L = new THREE.Group(); L.position.set(side * 0.1, -0.02, 0);
+      const m = new THREE.Mesh(G.leg, MAT.skin); m.position.y = -0.43; m.castShadow = true; L.add(m);
+      hips.add(L); return L;
+    };
+    const legL = leg(-1), legR = leg(1);
+    const torso = new THREE.Group(); torso.position.y = 0.1; hips.add(torso);
+    const chest = new THREE.Mesh(G.torso, jersey); chest.position.y = 0.28; chest.scale.set(1.18, 1, 0.78); chest.castShadow = true; torso.add(chest);
+    const head = new THREE.Mesh(G.head, MAT.skin); head.position.y = 0.72; head.castShadow = true; torso.add(head);
+    const arm = side => {
+      const A = new THREE.Group(); A.position.set(side * 0.23, 0.5, 0);
+      const m = new THREE.Mesh(G.arm, MAT.skin); m.position.y = -0.27; m.castShadow = true; A.add(m);
+      torso.add(A); return A;
+    };
+    const armL = arm(-1), armR = arm(1);
     // Подсветка «скорее всего этот игрок»: пульсирующее янтарное кольцо.
     const glow = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.62, 40), new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent: true, opacity: 0, depthWrite: false }));
     glow.rotation.x = -Math.PI / 2; glow.position.y = 0.012;
     g.add(glow);
-    const ringMat = new THREE.MeshBasicMaterial({ color: COLORS.coral, transparent: true, opacity: 0 });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.55, 40), ringMat);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.55, 40), new THREE.MeshBasicMaterial({ color: COLORS.coral, transparent: true, opacity: 0 }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
     g.add(ring);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(String(p.label)), depthTest: false }));
-    sprite.scale.set(0.75, 0.75, 1); sprite.position.y = 2.05; sprite.renderOrder = 10;
+    sprite.scale.set(0.62, 0.62, 1); sprite.position.y = 2.2; sprite.renderOrder = 10;
     g.add(sprite);
-    g.userData = { body, ring, glow, sprite, label: p.label, selected: false };
+    g.userData = { body: hit, jersey, fig, hips, torso, legL, legR, armL, armR, ring, glow, sprite, label: p.label, phase: Math.random() * 6, act: null, actKey: null, seed: Math.random() * 10 };
     scene.add(g);
     return g;
+  }
+  // Длительность движений, с.
+  const ACT_DUR = { rec: 0.75, dig: 0.75, set: 0.7, att: 1.15, blk: 0.95, serve: 1.05 };
+  const bell = f => Math.sin(Math.PI * Math.max(0, Math.min(1, f)));
+  const mix = (a, b, f) => a + (b - a) * Math.max(0, Math.min(1, f));
+  // Поза на кадр: бег по скорости + текущее движение. Углы рук: 0 — вниз, π/2 — вперёд, π — вверх.
+  function animate(rec, dt, now) {
+    const u = rec.group.userData, pos = rec.group.position;
+    rec.prev ??= pos.clone();
+    const spd = Math.min(8, pos.distanceTo(rec.prev) / Math.max(dt, 1e-3));
+    rec.prev.copy(pos);
+    rec.spd = mix(rec.spd ?? 0, spd, dt * 8);
+    const run = Math.min(1, rec.spd / 2.2);
+    u.phase += dt * (5 + rec.spd * 3);
+    let crouch = 0.07 + 0.015 * Math.sin(now / 500 + u.seed), jump = 0, lean = 0.12 + run * 0.18;
+    let legSw = Math.sin(u.phase) * 0.75 * run;
+    let aL = 0.55 - legSw * 0.6, aR = 0.55 + legSw * 0.6, spread = 0.12; // стойка: руки чуть вперёд
+    const a = u.act;
+    if (a) {
+      const f = (now - a.t0) / 1000 / ACT_DUR[a.type];
+      if (f >= 1) u.act = null;
+      else {
+        legSw *= 0.2;
+        if (a.type === 'rec' || a.type === 'dig') { crouch += 0.3 * bell(f); lean = 0.45 * bell(f) + 0.12; aL = aR = mix(0.55, 1.05, f * 3); spread = 0.02; }
+        if (a.type === 'set') { jump = 0.12 * bell(f); aL = aR = mix(0.55, 2.75, f * 3); spread = 0.18; lean = 0; }
+        if (a.type === 'att') {
+          crouch += 0.25 * bell(f / 0.3);
+          jump = f > 0.28 ? 0.85 * bell((f - 0.28) / 0.62) : 0;
+          aL = mix(0.6, 2.9, (f - 0.2) * 4);
+          aR = f < 0.55 ? mix(0.6, 3.5, (f - 0.2) * 4) : mix(3.5, 0.9, (f - 0.55) * 5);
+          lean = f < 0.55 ? -0.25 : mix(-0.25, 0.35, (f - 0.55) * 4);
+        }
+        if (a.type === 'blk') { crouch += 0.2 * bell(f / 0.25); jump = f > 0.2 ? 0.65 * bell((f - 0.2) / 0.75) : 0; aL = aR = mix(0.6, 3.05, f * 4); spread = 0.05; lean = 0; }
+        if (a.type === 'serve') {
+          aL = f < 0.45 ? mix(0.5, 2.8, f * 4) : mix(2.8, 0.6, (f - 0.45) * 3);
+          aR = f < 0.5 ? mix(0.5, 3.4, (f - 0.15) * 4) : mix(3.4, 1.0, (f - 0.5) * 4);
+          jump = f > 0.35 ? 0.3 * bell((f - 0.35) / 0.5) : 0;
+        }
+      }
+    }
+    u.fig.position.y = jump;
+    u.hips.position.y = 0.9 - crouch;
+    u.legL.rotation.x = legSw + crouch * 0.8; u.legR.rotation.x = -legSw + crouch * 0.8;
+    u.torso.rotation.x = -lean;
+    // Положительный угол поднимает руку вперёд (к сетке), π — вверх.
+    u.armL.rotation.x = aL; u.armR.rotation.x = aR;
+    u.armL.rotation.z = -spread; u.armR.rotation.z = spread;
   }
   function setPlayers(list) {
     const seen = new Set();
@@ -192,8 +269,11 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       rec.target = toWorld(p.spot);
       rec.pinned = !!p.pinned; // игрок у мяча: его не толкают, он толкает других
       rec.hl = !!p.hl;
-      rec.group.userData.body.material.color.set(p.setter ? 0xf0c85a : 0xe6e6e6);
-      rec.group.userData.body.material.emissive?.set(p.hl ? 0x4a3a10 : 0x000000);
+      const u = rec.group.userData;
+      u.jersey.color.set(p.setter ? 0xf0c85a : 0xe9eaec);
+      u.jersey.emissive.set(p.hl ? 0x5a4512 : 0x000000);
+      // Движение: новое действие запускается, когда меняется его ключ.
+      if (p.act && p.act.key !== u.actKey) { u.actKey = p.act.key; u.act = { type: p.act.type, t0: performance.now() }; }
       rec.group.userData.ring.material.opacity = p.selected ? 1 : p.server ? 0.55 : 0;
       rec.group.userData.ring.material.color.set(p.selected ? COLORS.coral : COLORS.mint);
     }
@@ -323,7 +403,13 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   // Траектории: [{ from, to, y0, y1, apex, color, ball }]. Последняя с ball=true — по ней летит мяч.
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 24, 24), new THREE.MeshStandardMaterial({ color: 0xf6e7a1, roughness: 0.5 }));
   ball.castShadow = true; ball.visible = false; scene.add(ball);
-  let flight = null;
+  let flight = null, manualBall = false;
+  // Мяч по времени видео (повтор розыгрыша): позицию задаёт студия, анимация полёта выключается.
+  function setBall(p) {
+    manualBall = !!p;
+    if (p) { flight = null; ball.visible = true; ball.position.copy(toWorld(p, p.h ?? 0.5)); }
+    else if (!flight) ball.visible = false;
+  }
   let trailsKey = '';
   function setTrails(list = [], { animate = true } = {}) {
     const key = JSON.stringify(list);
@@ -347,8 +433,8 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       end.rotation.x = -Math.PI / 2; end.position.set(pts.at(-1).x, 0.009, pts.at(-1).z);
       trails.add(end);
     }
-    flight = animate && curves.length ? { curves, k: 0, t: 0 } : null;
-    ball.visible = !!flight;
+    flight = animate && curves.length && !manualBall ? { curves, k: 0, t: 0 } : null;
+    ball.visible = !!flight || manualBall;
   }
 
   // ---------- Камера ----------
@@ -453,7 +539,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     }
     // Пульс подсветки.
     const pulse = 0.55 + 0.4 * Math.sin(now / 160);
-    for (const rec of players.values()) rec.group.userData.glow.material.opacity = rec.hl ? pulse : 0;
+    for (const rec of players.values()) { rec.group.userData.glow.material.opacity = rec.hl ? pulse : 0; animate(rec, dt, now); }
     if (flight) {
       flight.t += dt * 1.6;
       // Мяч пролетает розыгрыш один раз и остаётся в последней точке.
@@ -473,7 +559,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   }
 
   return {
-    setPlayers, setPending, setDots, setTrails, setView, resize, setHands, setPreview, project,
+    setPlayers, setPending, setDots, setTrails, setView, resize, setHands, setPreview, project, setBall,
     setWheelCapture: on => { wheelCapture = on; controls.enableZoom = !on; },
     toggleZones: on => { zoneGrid.visible = on ?? !zoneGrid.visible; return zoneGrid.visible; },
     dispose: () => { renderer.setAnimationLoop(null); renderer.dispose(); },
