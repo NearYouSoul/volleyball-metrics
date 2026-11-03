@@ -5,7 +5,9 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "build:css": "tailwindcss -i src/app.css -o public/app.css --minify"
+    "build:css": "tailwindcss -i src/app.css -o public/app.css --minify",
+    "demo": "node scripts/demo.js --dir demo-data --force",
+    "start:demo": "node server.js --data demo-data"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

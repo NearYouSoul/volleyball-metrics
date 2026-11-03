@@ -13,7 +13,9 @@ import { replayQuick } from './public/quick-engine.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
-const DATA = process.env.DATA_DIR || path.join(ROOT, 'data'); // DATA_DIR — чтобы проверять на копии данных
+// Папка данных: --data <папка> или DATA_DIR — чтобы проверять на копии данных или на демо.
+const argData = process.argv.includes('--data') ? process.argv[process.argv.indexOf('--data') + 1] : null;
+const DATA = path.resolve(ROOT, argData || process.env.DATA_DIR || 'data');
 const PORT = Number(process.env.PORT) || 4200;
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2',
@@ -21,7 +23,7 @@ const TYPES = {
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
 };
 // Видеотека: файлы копируются сюда при загрузке (перетаскиванием в студии), список — в videos.json.
-const VIDEOS = path.join(process.env.DATA_DIR || path.join(ROOT, 'data'), 'videos');
+const VIDEOS = path.join(DATA, 'videos');
 const VIDEO_EXT = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv']);
 
 await mkdir(DATA, { recursive: true });

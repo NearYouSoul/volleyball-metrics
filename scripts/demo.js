@@ -1,14 +1,15 @@
 // Демо-данные: команда, соперники и два правдоподобных матча детальной статистики
 // с точками на площадке, пасами и темпами — чтобы посмотреть студию и дашборд без настоящей игры.
-//   node scripts/demo.js            — в папку data/ (существующие файлы НЕ трогает, если там уже есть состав)
-//   DATA_DIR=/tmp/x node scripts/demo.js --force
+//   npm run demo                    — в папку demo-data/, потом npm run start:demo
+//   node scripts/demo.js --dir data  — в рабочую папку (если там уже есть состав — не трогает без --force)
 import { mkdir, writeFile, access } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { replay } from '../public/engine.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const DATA = process.env.DATA_DIR || path.join(ROOT, 'data');
+const argDir = process.argv.includes('--dir') ? process.argv[process.argv.indexOf('--dir') + 1] : null;
+const DATA = path.resolve(ROOT, argDir || process.env.DATA_DIR || 'data');
 const force = process.argv.includes('--force');
 
 let seed = 7;
@@ -115,7 +116,7 @@ const roster_file = path.join(DATA, 'roster.json');
 await mkdir(DATA, { recursive: true });
 const exists = await access(roster_file).then(() => true, () => false);
 if (exists && !force) {
-  console.log(`В ${DATA} уже есть состав. Чтобы не испортить настоящие данные, демо не записано.\nЗапустите с --force или укажите другую папку: DATA_DIR=demo-data node scripts/demo.js`);
+  console.log(`В ${DATA} уже есть состав. Чтобы не испортить настоящие данные, демо не записано.\nЗапустите с --force или укажите другую папку: npm run demo`);
   process.exit(0);
 }
 await writeFile(roster_file, JSON.stringify(roster, null, 1));
