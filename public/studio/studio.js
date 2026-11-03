@@ -1249,7 +1249,7 @@ function slotZone(s, r, ms) {
 function presetWork(pr) {
   const data = {};
   for (const k of Object.keys(SITUATIONS)) { data[k] = {}; for (let r = 1; r <= 6; r++) data[k][r] = tableFor(pr.formations, k, r); }
-  return { id: pr.id, name: pr.name, system: pr.system || '5-1', lineup: pr.lineup ?? null, data, touched: JSON.parse(JSON.stringify(pr.formations?.touched ?? {})), inherited: {} };
+  return { id: pr.id, name: pr.name, system: pr.system || '5-1', rules: pr.rules ?? 'strict', lineup: pr.lineup ?? null, data, touched: JSON.parse(JSON.stringify(pr.formations?.touched ?? {})), inherited: {} };
 }
 function openFormEditor() {
   const works = presets().map(presetWork);
@@ -1306,7 +1306,10 @@ function paintFormEditor(fromRot = null) {
   const base = f.data[f.kind][f.rot];
   const tab = view === 'base' ? base : defenseLayout(base, { x: { left: 1.5, center: 4.5, right: 7.5 }[view] }).spots;
   // Протокол: в момент подачи (приём и наша подача) проверяем правила расстановки.
-  const legal = view === 'base' && (f.kind === 'rec' || f.kind === 'serve') ? overlapIssues(base, { server: f.kind === 'serve' }) : null;
+  // Правила расстановки проверяем только на приёме и только в строгом режиме пресета;
+  // на своей подаче команда стоит свободно (современные правила), в свободном режиме — без проверок вовсе.
+  const strict = (editPreset()?.rules ?? 'strict') === 'strict';
+  const legal = view === 'base' && f.kind === 'rec' && strict ? overlapIssues(base) : null;
   const sy = y => 9 - y; // сетка сверху
   // Фишки по игрокам (слотам): при переходе на другую расстановку каждый плавно едет из старой точки в новую.
   const oldTab = fromRot != null && fromRot !== f.rot ? f.data[f.kind][fromRot] : null;
@@ -1326,6 +1329,10 @@ function paintFormEditor(fromRot = null) {
   modal(`<h2>Расстановки команды</h2>
     <div class="pbar">Пресет
       <select data-k="fPreset">${f.works.map(x => `<option value="${x.id}" ${x.id === f.presetId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      <select data-k="fRules" title="Проверять ли правила расстановки на приёме (до подброса мяча соперником)">
+        <option value="strict" ${(w.rules ?? 'strict') === 'strict' ? 'selected' : ''}>Строгие правила при приёме</option>
+        <option value="free" ${w.rules === 'free' ? 'selected' : ''}>Свободно (без проверки)</option>
+      </select>
       <select data-k="fSystem" title="Схема игры пресета">${Object.entries(SYSTEMS).map(([k, v]) => `<option value="${k}" ${w.system === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
       <button class="btn sm" data-a="fNew" title="Новый пресет — копия текущего">＋ Копия</button>
       <button class="btn sm ghost" data-a="fRename">Переименовать</button>
@@ -1342,6 +1349,8 @@ function paintFormEditor(fromRot = null) {
       ${f.kind === 'def' ? `<div class="seg" title="Как команда встанет, когда поставите блок у сетки">${[['base', 'Базовая'], ['left', 'Блок слева'], ['center', 'По центру'], ['right', 'Справа']].map(([k, v]) => `<button class="${view === k ? 'on' : ''}" data-a="fDefView" data-v="${k}">${v}</button>`).join('')}</div>` : ''}
       <div class="seg" title="В порядке переходов: игроки идут по часовой стрелке, номер расстановки — против">
         <button data-a="fStep" data-d="-1" title="Предыдущий переход">◀</button>${GAME_ORDER.map(r => `<button class="${f.rot === r ? 'on' : ''} ${isTouched(f, f.kind, r) ? 'done' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}<button data-a="fStep" data-d="1" title="Следующий переход">▶</button></div></div>
+    ${view === 'base' && f.kind === 'serve' ? '<div class="banner" style="margin:0 0 8px">На своей подаче игроки стоят свободно — правила расстановки действуют только для принимающей команды.</div>' : ''}
+    ${view === 'base' && f.kind === 'rec' && !strict ? '<div class="banner" style="margin:0 0 8px">Свободный режим: правила расстановки не проверяются.</div>' : ''}
     ${legal ? (legal.issues.length ? `<div class="banner bad" style="margin:0 0 8px">Нарушение расстановки при подаче: ${legal.issues.join('; ')}</div>` : `<div class="banner ok" style="margin:0 0 8px">Расстановка по правилам: линии не пересекаются до удара по мячу.</div>`) : ''}
     ${inh ? `<div class="banner" style="margin:0 0 8px">Р${f.rot} ещё не настроена — игроки сдвинуты на один переход из Р${prevRot(f.rot)}. Поправьте места — и она запомнится.</div>` : ''}
     <div class="zwrap"><svg id="fsvg" viewBox="-1.6 -1.1 12.2 13.4">
@@ -1890,7 +1899,7 @@ const H = {
     const f = ui.fEdit;
     const list = f.works.map(w => {
       for (const k in w.inherited) for (const r in w.inherited[k]) (w.touched[k] ??= {})[r] = true;
-      return { id: w.id, name: w.name, system: w.system, ...(w.lineup && { lineup: w.lineup }), formations: { ...w.data, touched: w.touched } };
+      return { id: w.id, name: w.name, system: w.system, rules: w.rules ?? 'strict', ...(w.lineup && { lineup: w.lineup }), formations: { ...w.data, touched: w.touched } };
     });
     ui.settings = await api('PUT', '/api/settings', { presets: list, activePreset: f.presetId });
     // Открытый матч переходит на выбранный пресет (и его схему).
@@ -2012,6 +2021,7 @@ document.addEventListener('change', e => {
   if (k === 'lsetter') ui.lineupDraft.setter = v;
   if (k === 'fPreset') { ui.fEdit.presetId = v; bindPreset(); paintFormEditor(); }
   if (k === 'fSystem') { editPreset().system = v; }
+  if (k === 'fRules') { editPreset().rules = v; paintFormEditor(); }
   if (k === 'fSlot') {
     // Игрок уже стоит в другой зоне — меняем их местами.
     const lu = ensurePresetLineup(), sl = +e.target.dataset.slot, other = lu.start.indexOf(v);
