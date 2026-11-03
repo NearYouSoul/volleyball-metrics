@@ -83,7 +83,7 @@ svg { width: 18px; height: 18px; flex: none; }
 .seg button:hover { color: var(--text); }
 .seg button.on { background: var(--raise); color: var(--text); box-shadow: var(--key); }
 .seg button svg { width: 16px; height: 16px; }
-.kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; font: 500 10.5px var(--mono); color: var(--smoke); box-shadow: 0 0 0 1px var(--line-2); }
+.kbd { white-space: nowrap; display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; font: 500 10.5px var(--mono); color: var(--smoke); box-shadow: 0 0 0 1px var(--line-2); }
 .toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--ash); font-size: 12.5px; cursor: pointer; user-select: none; }
 .toggle input { accent-color: var(--mint); width: 15px; height: 15px; }
 select, input[type=text], input[type=number], input:not([type]) { background: var(--well); border: 0; border-radius: 7px; padding: 7px 10px; outline: none; box-shadow: inset 0 0 0 1px var(--line); min-width: 0; }
@@ -321,9 +321,38 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 .toast.err { background: var(--coral); color: #1a0909; }
 
-@media (max-width: 1280px) {
-  :root { --side-w: 330px; }
-  .dock { grid-template-columns: 250px minmax(0, 1fr) 260px; }
+@media (max-width: 1440px) {
+  :root { --side-w: 320px; }
+  .dock { grid-template-columns: 236px minmax(0, 1fr) 258px; }
+  .skills .kbd { display: none; }
+}
+/* Ноутбуки с невысоким экраном (1366×768 и т. п.): док компактнее, видео — больше. */
+@media (max-height: 860px) {
+  .app { grid-template-rows: 46px minmax(0, 1fr) auto; }
+  .dock > div { padding: 8px 12px 10px; max-height: 32vh; overflow-y: auto; }
+  .dock h4 { margin-bottom: 6px; }
+  .ptile { height: 44px; }
+  .ptile .n { font-size: 17px; }
+  .ptile .nm { font-size: 10px; }
+  .rot { gap: 4px; }
+  .act { height: 40px; font-size: 13px; padding: 0 20px; }
+  .act .kbd { top: 3px; right: 3px; min-width: 15px; height: 15px; font-size: 9.5px; }
+  .acts { gap: 5px; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+  .skills { margin-bottom: 6px; gap: 2px; }
+  .skills button { height: 26px; padding: 0 7px 0 6px; font-size: 12px; }
+  .act-hint { margin-top: 6px; font-size: 11.5px; }
+  .act-hint span:last-child { display: none; }
+  .transport { padding: 3px 10px; }
+  .ibtn.play { width: 34px; height: 34px; }
+  .timeline { height: 32px; }
+  .tl-track { inset: 5px 14px; }
+  .tl-track .mk { top: 6px; }
+  .rot-meta { margin-top: 6px; }
+  .ctx .lbl { margin: 6px 0 4px; }
+  .ctx .muted { display: none; }
+  .team-acts .act { height: 34px; }
+  .tools-row { margin-top: 6px; }
+  .tempo button { height: 28px; font-size: 11.5px; }
 }
 @media (max-width: 980px) {
   body { overflow: auto; }

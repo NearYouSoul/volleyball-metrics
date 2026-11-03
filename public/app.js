@@ -1,6 +1,7 @@
 // Пульт: экраны «Меню», «Состав», «Порядок подачи», «Матч».
 // Всё состояние матча вычисляет engine.js из списка событий, который хранится на сервере.
 import { replay, playerName, LABELS } from './engine.js';
+import { SYSTEMS } from './court.js';
 
 const $app = document.getElementById('app');
 const ui = { view: 'home', matches: [], roster: [], settings: { teamName: 'Мы', opponents: [] }, match: null, st: null, sel: null, sub: null, lineup: [], weServe: true, busy: false };
@@ -56,7 +57,8 @@ function viewHome() {
     <div class="col">
       <button class="primary" data-a="pickOpponent">Новый матч</button>
       <button data-a="settings">Настройки · игроков ${ui.roster.length} · соперников ${ui.settings.opponents.length}</button>
-      <a class="btn" href="stats.html">📊 Дашборд</a>
+      <a class="btn" href="stats.html">📊 Аналитика</a>
+      <a class="btn" href="studio.html">🎬 Студия (ноутбук): видео и 3D</a>
     </div>
     <h2>Матчи</h2>
     <div class="col">${ui.matches.map(m => `
@@ -87,6 +89,12 @@ function viewSettings() {
     ${viewQr()}
     <h2>Наша команда</h2>
     <input value="${esc(ui.settings.teamName)}" data-k="teamName" placeholder="Название команды" style="width:100%">
+    <h2>Схема игры</h2>
+    <select data-k="system" style="width:100%;padding:12px;border-radius:8px;background:rgb(255 255 255 / .05);color:#fff;border:0;font:inherit">
+      ${Object.entries(SYSTEMS).map(([k, v]) => `<option value="${k}" ${(ui.settings.system || '5-1') === k ? 'selected' : ''}>${v}</option>`).join('')}
+    </select>
+    <p class="hint">Схема подсказывает, кто пасует, если пас не отмечен: в 4-2 — связующий из передней линии, в гибриде — основной, если он на площадке.
+      Для новых матчей; у начатых меняется в студии.</p>
     <h2>Игроки</h2>
     <p class="hint">«Связ.» — связующий. Он подставляется в статистику связок автоматически, когда стоит на площадке.
       Имена можно менять — статистика старых матчей сохранится.</p>
@@ -160,11 +168,12 @@ function btn(cls, skill, res, text, p = null) {
 
 // Группы действий игрока. Главная группа зависит от фазы, остальные — под «Другое».
 const GROUPS = {
-  rec: p => ['Приём', [btn('g', 'rec', 'pp', '++', p), btn('y', 'rec', 'pm', '+−', p), btn('n', 'rec', 'p', '+', p), btn('r', 'rec', 'error', 'Не принял', p)]],
+  rec: p => ['Приём', [btn('g', 'rec', 'pp', '++', p), btn('y', 'rec', 'pm', '+−', p), btn('n', 'rec', 'p', '+', p), btn('y', 'rec', 'over', 'Перекид', p), btn('r', 'rec', 'error', 'Не принял', p)]],
   att: p => ['Атака', [btn('g', 'att', 'kill', 'Забил', p), btn('g', 'att', 'bo', 'От блока', p), btn('n', 'att', 'play', 'В игре', p),
     btn('r', 'att', 'error', 'Аут / сетка', p), btn('r', 'att', 'blocked', 'Заблокир.', p)]],
   def: p => ['Защита и блок', [btn('g', 'blk', 'point', 'Блок: очко', p), btn('n', 'dig', 'plus', 'Защита +', p), btn('y', 'dig', 'minus', 'Защита −', p),
     btn('y', 'blk', 'touch', 'Касание блоком', p), btn('r', 'blk', 'out', 'Блок-аут', p), btn('r', 'dig', 'error', 'Не поднял', p)]],
+  set: p => ['Пас', [btn('g', 'set', 'perfect', 'Идеальный', p), btn('n', 'set', 'good', 'Хороший', p), btn('y', 'set', 'poor', 'Неудобный', p), btn('r', 'set', 'error', 'Ошибка паса', p)]],
   fault: p => ['Прочее', [btn('r', 'fault', 'error', 'Ошибка: сетка / заступ / касания', p)]],
 };
 const MAIN_GROUP = { rec: 'rec', ours: 'att', their: 'def', serve: 'def' };
@@ -314,7 +323,7 @@ const handlers = {
   saveSettings: () => call(async () => {
     const roster = ui.roster.filter(p => p.num !== '' || p.name.trim()).map(p => ({ ...p, num: Number(p.num), name: p.name.trim() }));
     const opponents = ui.settings.opponents.filter(o => o.name.trim()).map(o => ({ ...o, name: o.name.trim() }));
-    const settings = { teamName: ui.settings.teamName.trim() || 'Мы', opponents };
+    const settings = { teamName: ui.settings.teamName.trim() || 'Мы', opponents, system: ui.settings.system || '5-1' };
     [ui.roster, ui.settings] = await Promise.all([api('PUT', '/api/roster', roster), api('PUT', '/api/settings', settings)]);
     ui.view = 'home';
   }),

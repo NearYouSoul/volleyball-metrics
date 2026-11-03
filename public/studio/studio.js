@@ -50,6 +50,9 @@ function toast(text, err = false) {
 function setMatch(match) {
   ui.match = match;
   recompute();
+  // Краткая сводка в списке матчей — без лишнего запроса к серверу.
+  const sum = ui.matches.find(x => x.id === match.id);
+  if (sum) Object.assign(sum, { events: match.events.length, setsWon: ui.full.setsWon, videos: match.videos || [] });
   if (location.hash !== '#m=' + match.id) history.replaceState(null, '', '#m=' + match.id);
   store.set('lastMatch', match.id);
 }
@@ -260,6 +263,7 @@ function paintCourt() {
 // ---------- Отрисовка ----------
 function paintTop() {
   const m = ui.match, st = ui.st;
+  document.querySelector('.top-actions .btn-chip').href = m ? `stats.html#m=${m.id}` : 'stats.html';
   $('matchPick').innerHTML = m ? `<b>${esc(ui.settings.teamName)} — ${esc(m.opponent)}</b> · ${new Date(m.created).toLocaleDateString('ru')}` : 'Выберите матч';
   if (!m || !st.set) { $('score').innerHTML = ''; $('phase').innerHTML = ''; $('phase').className = 'phase-pill'; return; }
   const s = st.set;
@@ -335,7 +339,7 @@ function paintDock() {
   const points = pt('to', 'to', 'Куда') + pt('from', 'from', 'Откуда');
   const setCtl = g === 'set' ? `
     <div class="lbl">Темп паса</div>
-    <div class="tempo">${Object.entries(TEMPOS).map(([k, t]) => `<button class="${ui.tempo === k ? 'on' : ''}" data-a="tempo" data-v="${k}" title="${t.label}">${t.short} · ${t.label.split(' (')[0]}</button>`).join('')}</div>
+    <div class="tempo">${Object.entries(TEMPOS).map(([k, t]) => `<button class="${ui.tempo === k ? 'on' : ''}" data-a="tempo" data-v="${k}" title="${t.label}">${{ q: '1 темп', f: '2 темп', h: '3 темп' }[k]}</button>`).join('')}</div>
     <div class="lbl">Высота траектории <b>${(ui.h ?? TEMPOS[ui.tempo].h).toFixed(1)} м</b></div>
     <input type="range" min="2.6" max="9" step="0.1" value="${ui.h ?? TEMPOS[ui.tempo].h}" data-k="setH">
     ${ui.pending.to ? `<div class="muted" style="margin-top:6px">Направление: <b>${SET_DIRS[setDir(ui.pending.to)] ?? '—'}</b></div>` : '<div class="muted" style="margin-top:6px;font-size:12px;color:var(--smoke)">Кликните по площадке, куда отдан пас — появится траектория.</div>'}` : '';
@@ -535,7 +539,12 @@ function render() {
 }
 
 // ---------- Модальные окна ----------
-function modal(html) { $('modal').innerHTML = html ? `<div class="modal-bg" data-a="modalBg"><div class="modal">${html}</div></div>` : ''; }
+// Перерисовка открытого окна меняет только содержимое — без повторной анимации появления.
+function modal(html) {
+  const box = $('modal').querySelector('.modal');
+  if (html && box) box.innerHTML = html;
+  else $('modal').innerHTML = html ? `<div class="modal-bg" data-a="modalBg"><div class="modal">${html}</div></div>` : '';
+}
 const modalOpen = () => !!$('modal').innerHTML;
 
 function openLineup() {
@@ -710,6 +719,17 @@ async function openMatch(id) {
   else { ui.activeVideo = null; video.removeAttribute('src'); video.load(); }
 }
 
+// Новый матч. Если открыто видео — сразу привязываем его: обычно матч создают, уже открыв запись игры.
+async function createMatch(opponentId) {
+  modal('');
+  ui.insertAt = null; ui.edit = null; ui.sel = null; ui.pending = {}; ui.playlist = null;
+  setMatch(await api('POST', '/api/matches', { opponentId }));
+  ui.matches = await api('GET', '/api/matches');
+  if (ui.activeVideo) { await linkVideo(ui.activeVideo); store.set('video.' + ui.match.id, ui.activeVideo); toast('Открытое видео привязано к новому матчу'); }
+  recompute();
+  openLineup();
+}
+
 const H = {
   tab: d => { ui.tab = d.tab; render(); },
   help: openHelp,
@@ -748,7 +768,7 @@ const H = {
     sendRaw({ t: 'set', lineup: d.order, weServe: d.weServe, ...(setter && { setter }) });
   },
   newMatch: openNewMatch,
-  createMatch: d => call(async () => { modal(''); setMatch(await api('POST', '/api/matches', { opponentId: d.id })); ui.matches = await api('GET', '/api/matches'); recompute(); openLineup(); }),
+  createMatch: d => call(() => createMatch(d.id)),
   createNewOpp: () => {
     const nm = $('newOpp').value.trim();
     if (!nm) return;
@@ -757,11 +777,7 @@ const H = {
     const opp = { id: newId(), name: nm };
     call(async () => {
       ui.settings = await api('PUT', '/api/settings', { opponents: [...ui.settings.opponents, opp] });
-      modal('');
-      setMatch(await api('POST', '/api/matches', { opponentId: opp.id }));
-      ui.matches = await api('GET', '/api/matches');
-      recompute();
-      openLineup();
+      await createMatch(opp.id);
     });
   },
   open: d => call(() => openMatch(d.id)),
