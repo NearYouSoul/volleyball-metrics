@@ -1,0 +1,117 @@
+/* Дашборд детальной статистики. Токены, шрифты и кнопки — общие со студией. */
+@import url("studio.css");
+
+body.dash2 { overflow: auto; height: auto; min-height: 100%; }
+.dtop { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 18px; height: 56px; padding: 0 20px; background: rgb(17 18 21 / .88); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+.dnav { display: flex; gap: 2px; margin-right: auto; overflow-x: auto; }
+.dnav a { padding: 7px 12px; border-radius: 8px; color: var(--ash); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.dnav a:hover { color: var(--text); background: var(--well); }
+.dfilters { position: sticky; top: 56px; z-index: 19; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 20px; background: rgb(10 11 13 / .9); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+.dfilters label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--smoke); }
+.dfilters select { font-size: 13px; padding: 6px 8px; }
+.dfilters .grow { flex: 1; }
+.dmain { max-width: 1440px; margin: 0 auto; padding: 8px 20px 80px; }
+.dsec { padding-top: 28px; scroll-margin-top: 112px; }
+.dsec > h2 { margin: 0 0 4px; font-size: 22px; font-weight: 500; letter-spacing: -.005em; }
+.dsec > .sub { margin: 0 0 16px; color: var(--smoke); font-size: 13px; max-width: 760px; }
+.muted { color: var(--smoke); }
+.grid { display: grid; gap: 12px; align-items: start; }
+.g2 { grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.panel { background: var(--panel); border-radius: 14px; box-shadow: var(--key); padding: 16px 18px; min-width: 0; }
+.panel h3 { margin: 0 0 12px; font-size: 13px; font-weight: 500; color: var(--ash); display: flex; align-items: center; gap: 10px; }
+.panel h3 .grow { flex: 1; }
+.panel h3 small { color: var(--smoke); font-weight: 400; }
+
+/* KPI */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.kpi { background: var(--panel); border-radius: 14px; box-shadow: var(--key); padding: 16px 18px; }
+.kpi .t { font-size: 12.5px; color: var(--ash); }
+.kpi .v { margin-top: 8px; font-size: 34px; line-height: 1; font-weight: 400; font-variant-numeric: tabular-nums; }
+.kpi .v small { font-size: 15px; color: var(--smoke); margin-left: 4px; }
+.kpi .s { margin-top: 8px; font-size: 12px; color: var(--smoke); }
+.kpi .bar { margin-top: 10px; }
+
+/* Полоса долей (100%) с зазорами 2px */
+.bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; overflow: hidden; }
+.bar i { display: block; height: 100%; min-width: 2px; }
+.bar i:first-child { border-radius: 4px 0 0 4px; } .bar i:last-child { border-radius: 0 4px 4px 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 12px; color: var(--ash); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 9px; height: 9px; border-radius: 3px; }
+.legend b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* Площадка */
+.court2d { width: 100%; height: auto; display: block; }
+.court2d .cf.us { fill: #1d3a57; } .court2d .cf.them { fill: #22324a; }
+.court2d .cf.atk { fill: rgb(255 255 255 / .035); }
+.court2d .cl { stroke: #e9eaec; stroke-width: .06; }
+.court2d .zl { stroke: rgb(255 255 255 / .14); stroke-width: .03; stroke-dasharray: .15 .15; }
+.court2d .net { stroke: #fff; stroke-width: .14; stroke-linecap: round; }
+.court2d .dot { stroke: #111215; stroke-width: .05; }
+.court2d .dot:hover { stroke: #fff; stroke-width: .08; }
+.court2d .traj { fill: none; stroke-width: .05; opacity: .5; }
+.court2d .zlabel { font: 600 .55px var(--font); fill: #fff; text-anchor: middle; }
+.court2d .zsub { font: 500 .4px var(--font); fill: #e9eaec; text-anchor: middle; paint-order: stroke; stroke: #111215; stroke-width: .12px; }
+.court2d .bub { stroke: #111215; stroke-width: .06; }
+.heatwrap { display: grid; grid-template-columns: minmax(260px, 440px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.zgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.zcell { background: var(--well); border-radius: 9px; padding: 10px; text-align: center; }
+.zcell .z { font: 500 10px var(--mono); color: var(--smoke); }
+.zcell b { display: block; font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.zcell small { color: var(--smoke); font-size: 11.5px; }
+
+/* Таблицы */
+.tw { overflow-x: auto; }
+table.t { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+table.t th { padding: 8px 10px; font-size: 11.5px; font-weight: 500; color: var(--smoke); text-align: center; white-space: nowrap; border-bottom: 1px solid var(--line); }
+table.t th.grp { color: var(--ash); border-bottom: 0; border-left: 1px solid var(--line); }
+table.t td { padding: 8px 10px; text-align: center; border-bottom: 1px solid rgb(255 255 255 / .04); white-space: nowrap; }
+table.t td.b, table.t th.b { border-left: 1px solid var(--line); }
+table.t .l { text-align: left; }
+table.t tr:hover td { background: rgb(255 255 255 / .02); }
+table.t tr.total td { font-weight: 600; border-top: 1px solid var(--line-2); }
+table.t th.sort { cursor: pointer; } table.t th.sort:hover { color: var(--text); }
+table.t th.on { color: var(--text); } table.t th.on::after { content: " ↓"; }
+table.t tr > :first-child { position: sticky; left: 0; background: var(--panel); }
+.pos { color: var(--mint); } .neg { color: var(--coral); }
+.cellbar { position: relative; }
+.cellbar i { position: absolute; left: 4px; top: 50%; height: 18px; margin-top: -9px; border-radius: 4px; background: rgb(99 161 255 / .18); }
+.cellbar span { position: relative; }
+
+/* Расстановки */
+.rots { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.rcard { background: var(--panel); border-radius: 14px; box-shadow: var(--key); padding: 14px; }
+.rcard.weak { box-shadow: 0 0 0 1px rgb(255 99 99 / .45); }
+.rcard.strong { box-shadow: 0 0 0 1px rgb(89 212 153 / .4); }
+.rcard h4 { margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; font-size: 15px; font-weight: 500; }
+.rcard h4 small { color: var(--smoke); font-size: 12px; font-weight: 400; }
+.rcard h4 .tag { margin-left: auto; font-size: 11px; font-weight: 600; }
+.mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 12px; }
+.mini span { height: 32px; display: grid; place-items: center; border-radius: 6px; background: var(--well); font-size: 13px; font-weight: 500; }
+.mini span.s { background: rgb(240 200 90 / .16); color: var(--amber); }
+.rstat { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; font-size: 12.5px; color: var(--smoke); }
+.rstat b { color: var(--text); font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.meter { height: 6px; border-radius: 3px; background: var(--well); overflow: hidden; grid-column: 1 / -1; margin-bottom: 6px; }
+.meter i { display: block; height: 100%; border-radius: 3px; background: var(--mint); }
+
+/* Ход партии */
+.flowchart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.flowchart .ax { stroke: var(--line-2); stroke-width: 1; }
+.flowchart .gl { stroke: rgb(255 255 255 / .05); stroke-width: 1; }
+.flowchart text { font: 11px var(--font); fill: var(--smoke); }
+.flowchart .ln { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; }
+.flowchart .hit { fill: transparent; }
+.flowchart .cross { stroke: rgb(255 255 255 / .35); stroke-width: 1; }
+
+.tip { position: fixed; z-index: 90; pointer-events: none; padding: 8px 10px; border-radius: 8px; background: #e9eaec; color: #15161a; font-size: 12.5px; line-height: 1.35; box-shadow: 0 8px 24px rgb(0 0 0 / .45); opacity: 0; transform: translate(-50%, calc(-100% - 12px)); transition: opacity .08s; max-width: 260px; }
+.tip.on { opacity: 1; }
+.tip b { font-weight: 600; }
+
+.empty { padding: 28px; text-align: center; color: var(--smoke); background: var(--panel); border-radius: 14px; box-shadow: var(--key); }
+@media (max-width: 760px) {
+  .heatwrap { grid-template-columns: 1fr; }
+  .g2 { grid-template-columns: 1fr; }
+  .dtop { gap: 10px; padding: 0 12px; }
+  .dmain, .dfilters { padding-left: 12px; padding-right: 12px; }
+}

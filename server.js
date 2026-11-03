@@ -1,7 +1,9 @@
 // Веб-сервер на компьютере: отдаёт страницы и хранит матчи в папке data/.
 // Телефон — только пульт: каждое нажатие сразу уходит сюда и сохраняется на диск.
 import http from 'node:http';
-import { readFile, writeFile, rename, mkdir, readdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, readdir, stat } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,9 +15,18 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const DATA = process.env.DATA_DIR || path.join(ROOT, 'data'); // DATA_DIR — чтобы проверять на копии данных
 const PORT = Number(process.env.PORT) || 4200;
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2' };
+const TYPES = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2',
+  '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json',
+  '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
+};
+// Видеотека: файлы копируются сюда при загрузке (перетаскиванием в студии), список — в videos.json.
+const VIDEOS = path.join(process.env.DATA_DIR || path.join(ROOT, 'data'), 'videos');
+const VIDEO_EXT = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv']);
 
 await mkdir(DATA, { recursive: true });
+await mkdir(VIDEOS, { recursive: true });
+const videosFile = path.join(VIDEOS, 'videos.json');
 
 async function readJson(file, fallback) {
   try {
@@ -104,7 +115,7 @@ async function listMatches(full, mode) {
   const replayFn = mode === 'quick' ? replayQuick : replay;
   return matches.map(m => {
     const st = replayFn(m);
-    return { id: m.id, opponent: m.opponent, created: m.created, setsWon: st.setsWon, over: st.matchOver };
+    return { id: m.id, opponent: m.opponent, created: m.created, setsWon: st.setsWon, over: st.matchOver, videos: m.videos || [], events: m.events.length };
   });
 }
 
@@ -149,24 +160,93 @@ async function api(req, url) {
       opponent: refs.settings.opponents.find(o => o.id === opponentId)?.name || 'Соперник', // запасное имя, если соперника удалят
       created: new Date().toISOString(),
       roster: refs.roster, // копия состава на момент матча
+      system: refs.settings.system || '5-1', // схема игры: 5-1, 4-2, 6-2, гибрид
+      videos: [],
       events: [],
     };
     return serial(async () => { await writeJson(matchFile(match.id), match); return hydrate(match, refs); });
   }
 
-  const m = url.pathname.match(/^\/api\/matches\/([a-z0-9]+)(\/events(\/last)?)?$/);
+  // ---------- Видеотека ----------
+  if (route === 'GET /api/videos') return readJson(videosFile, []);
+  // Загрузка: тело запроса — сам файл, имя — в заголовке X-Filename. Пишем потоком: файлы бывают по несколько гигабайт.
+  if (route === 'POST /api/videos') {
+    const name = decodeURIComponent(req.headers['x-filename'] || 'video.mp4');
+    const ext = path.extname(name).toLowerCase();
+    if (!VIDEO_EXT.has(ext)) { req.resume(); return { error: `Формат ${ext || '?'} не поддерживается. Нужен mp4, mov, webm или mkv.` }; }
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    const file = `${id}${ext}`;
+    await pipeline(req, createWriteStream(path.join(VIDEOS, file + '.part')));
+    await rename(path.join(VIDEOS, file + '.part'), path.join(VIDEOS, file));
+    const { size } = await stat(path.join(VIDEOS, file));
+    const video = { id, name, file, size, created: new Date().toISOString() };
+    return serial(async () => { const list = await readJson(videosFile, []); list.unshift(video); await writeJson(videosFile, list); return video; });
+  }
+  const vm = url.pathname.match(/^\/api\/videos\/([a-z0-9]+)$/);
+  if (vm && req.method === 'PATCH') {
+    const patch = await readBody(req);
+    return serial(async () => {
+      const list = await readJson(videosFile, []);
+      const v = list.find(x => x.id === vm[1]);
+      if (!v) return null;
+      if (typeof patch.name === 'string') v.name = patch.name.trim() || v.name;
+      if (typeof patch.duration === 'number') v.duration = patch.duration;
+      await writeJson(videosFile, list);
+      return v;
+    });
+  }
+  if (vm && req.method === 'DELETE') {
+    return serial(async () => {
+      const list = await readJson(videosFile, []);
+      const v = list.find(x => x.id === vm[1]);
+      if (!v) return null;
+      await mkdir(path.join(TRASH, 'videos'), { recursive: true });
+      await rename(path.join(VIDEOS, v.file), path.join(TRASH, 'videos', v.file)).catch(() => {});
+      await writeJson(videosFile, list.filter(x => x !== v));
+      return { ok: true };
+    });
+  }
+
+  const m = url.pathname.match(/^\/api\/matches\/([a-z0-9]+)(\/events(\/last|\/(\d+))?)?$/);
   if (!m) return null;
   const file = matchFile(m[1]);
   if (req.method === 'GET' && !m[2]) {
     const match = await readJson(file, null);
     return match && hydrate(match, await loadRefs());
   }
+  // Свойства матча: привязанные видео, схема игры.
+  if (req.method === 'PATCH' && !m[2]) {
+    const patch = await readBody(req);
+    return serial(async () => {
+      const match = await readJson(file, null);
+      if (!match) return null;
+      if (Array.isArray(patch.videos)) match.videos = patch.videos;
+      if (typeof patch.system === 'string') match.system = patch.system;
+      await writeJson(file, match);
+      return hydrate(match, await loadRefs());
+    });
+  }
+  // Правка события по номеру (по видео): заменить или удалить любое, не только последнее.
+  if (m[4] && (req.method === 'PUT' || req.method === 'DELETE')) {
+    const k = Number(m[4]);
+    const ev = req.method === 'PUT' ? await readBody(req) : null;
+    return serial(async () => {
+      const match = await readJson(file, null);
+      if (!match || k >= match.events.length) return null;
+      if (ev) match.events[k] = ev; else match.events.splice(k, 1);
+      await writeJson(file, match);
+      return hydrate(match, await loadRefs());
+    });
+  }
   if (req.method === 'POST' && m[2] && !m[3]) {
     const ev = await readBody(req);
+    // ?at=N — вставить перед событием N (пропущенное касание, найденное на видео).
+    const at = url.searchParams.has('at') ? Number(url.searchParams.get('at')) : null;
     return serial(async () => {
       const match = await readJson(file, null);
       if (!match) return null; // матч удалили с другого устройства
-      match.events.push(ev);
+      if (at !== null && at >= 0 && at < match.events.length) match.events.splice(at, 0, ev);
+      else match.events.push(ev);
       await writeJson(file, match);
       return hydrate(match, await loadRefs());
     });
@@ -190,15 +270,35 @@ async function api(req, url) {
   return null;
 }
 
+// Видео отдаём кусками (Range): без этого браузер не умеет перематывать.
+async function sendVideo(req, res, name) {
+  const file = path.join(VIDEOS, path.basename(name));
+  const { size } = await stat(file);
+  const type = TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream';
+  const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+  if (!range) {
+    res.writeHead(200, { 'Content-Type': type, 'Content-Length': size, 'Accept-Ranges': 'bytes' });
+    return pipeline(createReadStream(file), res).catch(() => {});
+  }
+  let start = range[1] ? Number(range[1]) : size - Number(range[2]);
+  let end = range[1] && range[2] ? Number(range[2]) : size - 1;
+  start = Math.max(0, start); end = Math.min(end, size - 1);
+  if (start > end) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
+  res.writeHead(206, { 'Content-Type': type, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Accept-Ranges': 'bytes' });
+  return pipeline(createReadStream(file, { start, end }), res).catch(() => {});
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
     if (url.pathname.startsWith('/api/')) {
       const result = await api(req, url);
+      if (res.headersSent) return;
       res.writeHead(result === null ? 404 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify(result));
     }
-    const file = path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname);
+    if (url.pathname.startsWith('/media/')) return sendVideo(req, res, decodeURIComponent(url.pathname.slice(7)));
+    const file = path.join(PUBLIC, url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname));
     if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
     const data = await readFile(file);
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });

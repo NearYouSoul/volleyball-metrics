@@ -11,7 +11,7 @@ test('наша подача: эйс даёт очко, подаёт тот же 
   const st = run([{ t: 'set', lineup, weServe: true }, act('serve', 'ace', 'a')]);
   assert.equal(st.set.us, 1);
   assert.equal(st.rally.server, 'a');
-  assert.deepEqual(st.players.all.a.serve, { tot: 1, ace: 1, err: 0 });
+  assert.deepEqual(st.players.all.a.serve, { tot: 1, ace: 1, good: 0, err: 0 });
 });
 
 test('потеряли подачу, потом выиграли приём — подаёт следующий по порядку', () => {
@@ -24,7 +24,7 @@ test('потеряли подачу, потом выиграли приём — 
   assert.equal(st.set.us, 1);
   assert.equal(st.set.them, 1);
   assert.equal(st.rally.server, 'b');
-  assert.deepEqual(st.players.all.a.serve, { tot: 1, ace: 0, err: 0 }); // подача в игру
+  assert.deepEqual(st.players.all.a.serve, { tot: 1, ace: 0, good: 0, err: 0 }); // подача в игру
   assert.equal(st.teams.all.sideout.won, 1);
   assert.equal(st.teams.all.afterRec.pp.won, 1);
 });
@@ -72,7 +72,7 @@ test('фазы: подача → у них → защита → у нас → а
   const st = run([{ t: 'set', lineup, weServe: true }, ...steps]);
   assert.deepEqual(st.players.all.c.dig, { tot: 1, plus: 1, minus: 0, err: 0 });
   assert.deepEqual(st.players.all.a.dig, { tot: 1, plus: 0, minus: 0, err: 1 });
-  assert.deepEqual(st.players.all.a.serve, { tot: 1, ace: 0, err: 0 }); // подача в игру засчитана сама
+  assert.deepEqual(st.players.all.a.serve, { tot: 1, ace: 0, good: 0, err: 0 }); // подача в игру засчитана сама
 });
 
 test('детальный режим: тай-брейк (3-я партия) до 15, после 2 побед новые партии игнорируются', () => {
@@ -86,4 +86,56 @@ test('детальный режим: тай-брейк (3-я партия) до 
   assert.equal(st.sets.length, 3);
   assert.deepEqual(st.setsWon, { us: 1, them: 2 });
   assert.equal(st.matchOver, true);
+});
+
+test('расстановка: называется по зоне основного связующего и меняется при переходе', () => {
+  // f — шестой в порядке подачи. Подают они первыми → в зоне 1 стоит шестой (f) → Р1.
+  let st = run([{ t: 'set', lineup, weServe: false }]);
+  assert.equal(st.rally.rot, 1);
+  assert.deepEqual(st.rally.zones, [2, 3, 4, 5, 6, 1]);
+  // Сайд-аут: переход, подаёт a, f уходит в зону 6.
+  st = run([{ t: 'set', lineup, weServe: false }, act('team', 'oppError')]);
+  assert.equal(st.rally.rot, 6);
+  assert.equal(st.rally.zones[0], 1);
+  assert.equal(st.teams.all.rot[1].so.won, 1);
+});
+
+test('пас: связывается со следующей атакой, направление по зоне нападающего', () => {
+  // Подаём мы: a в зоне 1, b — 2, c — 3, d — 4.
+  const st = run([
+    { t: 'set', lineup, weServe: true }, act('serve', 'in', 'a'), act('dig', 'plus', 'e'),
+    { ...act('set', 'perfect', 'f'), tempo: 'h' }, act('att', 'kill', 'd'),
+  ]);
+  const set = st.plays.find(p => p.skill === 'set');
+  assert.equal(set.target, 'd');
+  assert.equal(set.attRes, 'kill');
+  assert.equal(set.dir, 4);
+  assert.equal(set.poss, 'trans');
+  assert.equal(set.won, true);
+  assert.deepEqual(st.players.all.f.set, { tot: 1, perfect: 1, good: 0, poor: 0, err: 0 });
+  assert.equal(st.plays.find(p => p.skill === 'att').setter, 'f');
+});
+
+test('пас без отметки: распределение считается «виртуальным» пасом, скидка связующего распознаётся', () => {
+  const st = run([{ t: 'set', lineup, weServe: false }, act('rec', 'pp', 'a'), act('att', 'kill', 'c'), act('serve', 'in'), act('dig', 'plus', 'b'), act('att', 'kill', 'f')]);
+  const virt = st.plays.filter(p => p.skill === 'set' && p.virtual);
+  assert.equal(virt.length, 1);
+  assert.equal(virt[0].recQ, 'pp');
+  assert.equal(virt[0].p, 'f');
+  const dump = st.plays.filter(p => p.skill === 'att').at(-1);
+  assert.equal(dump.dump, true);
+  assert.equal(st.teams.all.links['f>f'], undefined);
+});
+
+test('схема 4-2: пасует связующий из передней линии', () => {
+  const r2 = roster.map(p => ({ ...p, setter: p.id === 'f' || p.id === 'c' }));
+  // Подают они: зоны [2,3,4,5,6,1] → c в зоне 4 (передний), f в зоне 1.
+  const st = replay({ roster: r2, events: [{ t: 'set', lineup, weServe: false }, act('rec', 'p', 'a'), act('att', 'kill', 'b')] }, { system: '4-2' });
+  assert.equal(st.plays.find(p => p.skill === 'att').setter, 'c');
+});
+
+test('приём «перекид»: мяч уходит к ним', () => {
+  const st = run([{ t: 'set', lineup, weServe: false }, act('rec', 'over', 'a')]);
+  assert.equal(st.rally.phase, 'their');
+  assert.equal(st.players.all.a.rec.over, 1);
 });
