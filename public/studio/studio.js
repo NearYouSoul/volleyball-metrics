@@ -148,7 +148,7 @@ function queue(fn) {
   });
 }
 function postEvent(ev) {
-  ui.focusRally = null;
+  ui.focusRally = null; ui.pickedRally = false;
   const at = ui.insertAt, id = ui.match.id, before = rallyKey();
   if (at === null) ui.match.events.push(ev); else { ui.match.events.splice(at, 0, ev); ui.insertAt = at + 1; }
   recompute();
@@ -1254,7 +1254,7 @@ function rallySummary(r) {
   }).join(' → ');
 }
 function pickRally(key, { seek = true } = {}) {
-  ui.focusRally = key; ui.edit = null;
+  ui.focusRally = key; ui.edit = null; ui.pickedRally = true;
   const r = rallyByKey(key);
   if (seek && r?.t0 != null) {
     if (r.v && r.v !== ui.activeVideo && ui.videos.some(v => v.id === r.v)) openVideo(r.v);
@@ -1351,7 +1351,8 @@ function replayPlayers(r, t) {
 let replayKey = null;
 function replayTick() {
   requestAnimationFrame(replayTick);
-  if (!ui.match || !video.src || ui.draft || (ui.sync && ui.anchor != null)) { if (replayKey) { replayKey = null; court.setBall(null); paintCourt(); } return; }
+  // В синхронизации повтор — только если розыгрыш выбрали в истории сами (иначе он мешал бы вводу следующего).
+  if (!ui.match || !video.src || ui.draft || (ui.sync && (ui.anchor != null || !ui.pickedRally))) { if (replayKey) { replayKey = null; court.setBall(null); paintCourt(); } return; }
   const t = video.currentTime;
   const r = rallyAtTime(t);
   if (!r) { if (replayKey) { replayKey = null; court.setBall(null); paintCourt(); } return; }
