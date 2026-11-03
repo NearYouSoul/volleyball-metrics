@@ -69,7 +69,7 @@ function clearGroup(g) {
   g.clear();
 }
 
-export function createCourt3D(el, { onPick, onHover } = {}) {
+export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
@@ -82,7 +82,7 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
   scene.fog = new THREE.Fog(0x0b0c0e, 40, 75);
 
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
-  camera.position.set(0, 13, 20);
+  camera.position.set(0, 10.5, 15.5);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, 0);
   controls.enableDamping = true;
@@ -160,7 +160,12 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
     const g = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1.5, 24), new THREE.MeshStandardMaterial({ color: p.color ?? 0xe6e6e6, roughness: 0.6 }));
     body.position.y = 0.75; body.castShadow = true;
+    body.userData.pid = p.id; // по нему клик попадает в игрока
     g.add(body);
+    // Подсветка «скорее всего этот игрок»: пульсирующее янтарное кольцо.
+    const glow = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.62, 40), new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent: true, opacity: 0, depthWrite: false }));
+    glow.rotation.x = -Math.PI / 2; glow.position.y = 0.012;
+    g.add(glow);
     const ringMat = new THREE.MeshBasicMaterial({ color: COLORS.coral, transparent: true, opacity: 0 });
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.55, 40), ringMat);
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
@@ -168,7 +173,7 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(String(p.label)), depthTest: false }));
     sprite.scale.set(0.75, 0.75, 1); sprite.position.y = 2.05; sprite.renderOrder = 10;
     g.add(sprite);
-    g.userData = { body, ring, sprite, label: p.label, selected: false };
+    g.userData = { body, ring, glow, sprite, label: p.label, selected: false };
     scene.add(g);
     return g;
   }
@@ -184,7 +189,10 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
         players.set(p.id, rec);
       }
       rec.target = toWorld(p.spot);
+      rec.pinned = !!p.pinned; // игрок у мяча: его не толкают, он толкает других
+      rec.hl = !!p.hl;
       rec.group.userData.body.material.color.set(p.setter ? 0xf0c85a : 0xe6e6e6);
+      rec.group.userData.body.material.emissive?.set(p.hl ? 0x4a3a10 : 0x000000);
       rec.group.userData.ring.material.opacity = p.selected ? 1 : p.server ? 0.55 : 0;
       rec.group.userData.ring.material.color.set(p.selected ? COLORS.coral : COLORS.mint);
     }
@@ -195,6 +203,83 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
   const marks = new THREE.Group(); scene.add(marks);
   const dots = new THREE.Group(); scene.add(dots);
   const trails = new THREE.Group(); scene.add(trails);
+
+  // ---------- Руки блока ----------
+  // Блокирующие: две руки над сеткой. side 'them' — блок соперника (перед нашим нападающим), 'us' — наш блок.
+  const hands = new THREE.Group(); scene.add(hands);
+  const skin = { them: new THREE.MeshStandardMaterial({ color: 0xff8a7a, roughness: 0.55, transparent: true, opacity: 0.92 }),
+    us: new THREE.MeshStandardMaterial({ color: 0x8fd8b4, roughness: 0.55, transparent: true, opacity: 0.92 }) };
+  skin.them.userData.shared = skin.us.userData.shared = true;
+  const armGeo = new THREE.CapsuleGeometry(0.075, 0.75, 4, 12), palmGeo = new THREE.BoxGeometry(0.19, 0.26, 0.06);
+  const bodyGeo = new THREE.CapsuleGeometry(0.26, 1.15, 4, 16);
+  const ghost = new THREE.MeshStandardMaterial({ color: 0xff6363, roughness: 0.7, transparent: true, opacity: 0.35 });
+  ghost.userData.shared = true;
+  const hitGeo = new THREE.BoxGeometry(1.0, 1.3, 0.7);
+  const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+  let handsKey = '';
+  function setHands(list = []) {
+    const key = JSON.stringify(list);
+    if (key === handsKey) return;
+    handsKey = key;
+    hands.clear();
+    for (const h of list) {
+      const g = new THREE.Group();
+      const dz = h.side === 'them' ? -0.3 : 0.3; // руки — над своей половиной, чуть за сеткой
+      // Блокирующий соперника — полупрозрачный силуэт под руками (своих игроков видно и так).
+      if (h.side === 'them') { const b = new THREE.Mesh(bodyGeo, ghost); b.position.set(0, 0.85, -0.55); g.add(b); }
+      for (const sx of [-0.2, 0.2]) {
+        const arm = new THREE.Mesh(armGeo, skin[h.side]);
+        arm.position.set(sx, NET_H + 0.2, dz);
+        arm.rotation.x = h.side === 'them' ? 0.28 : -0.28; // руки наклонены над сеткой
+        arm.castShadow = true;
+        const palm = new THREE.Mesh(palmGeo, skin[h.side]);
+        palm.position.set(sx * 1.08, NET_H + 0.68, dz + (h.side === 'them' ? 0.12 : -0.12));
+        palm.rotation.x = arm.rotation.x;
+        g.add(arm, palm);
+      }
+      const hit = new THREE.Mesh(hitGeo, hitMat);
+      hit.position.set(0, NET_H + 0.35, dz);
+      hit.userData.hands = h.side;
+      g.add(hit);
+      g.position.x = h.x - 4.5;
+      hands.add(g);
+    }
+  }
+
+  // ---------- Предпросмотр: линии за мышью ----------
+  // Перерисовываются на каждое движение мыши, поэтому геометрия переиспользуется, а не создаётся заново.
+  const previews = [0, 1, 2].map(() => {
+    const geo = new THREE.BufferGeometry().setFromPoints(Array.from({ length: 41 }, () => new THREE.Vector3()));
+    const solid = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: COLORS.white, transparent: true, opacity: 0.95 }));
+    const dashed = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: COLORS.white, dashSize: 0.22, gapSize: 0.14, transparent: true, opacity: 0.9 }));
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 20), new THREE.MeshStandardMaterial({ color: 0xf6e7a1, roughness: 0.45 }));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 32), new THREE.MeshBasicMaterial({ color: COLORS.white, side: THREE.DoubleSide, transparent: true }));
+    ring.rotation.x = -Math.PI / 2;
+    solid.visible = dashed.visible = tip.visible = ring.visible = false;
+    scene.add(solid, dashed, tip, ring);
+    return { geo, solid, dashed, tip, ring };
+  });
+  // list: [{ from, to, y0, y1, apex, color, dashed, ball }]
+  function setPreview(list = []) {
+    previews.forEach((pv, k) => {
+      const t = list[k];
+      pv.solid.visible = pv.dashed.visible = pv.tip.visible = pv.ring.visible = false;
+      if (!t) return;
+      const pts = arcPoints(t.from, t.to, t.y0 ?? 1, t.y1 ?? 0.1, t.apex ?? 2, 40);
+      const pos = pv.geo.attributes.position;
+      pts.forEach((v, i) => pos.setXYZ(i, v.x, v.y, v.z));
+      pos.needsUpdate = true;
+      pv.geo.computeBoundingSphere();
+      const line = t.dashed ? pv.dashed : pv.solid;
+      if (t.dashed) pv.dashed.computeLineDistances();
+      line.material.color.set(t.color ?? COLORS.white);
+      line.visible = true;
+      pv.ring.visible = true;
+      pv.ring.material.color.set(t.color ?? COLORS.white);
+      pv.ring.position.set(pts.at(-1).x, 0.015, pts.at(-1).z);
+      if (t.ball) { pv.tip.visible = true; pv.tip.position.copy(t.ballAtEnd ? pts.at(-1) : pts[Math.round(pts.length * 0.35)]); }
+    });
+  }
   const marker = (p, color, r = 0.32) => {
     const g = new THREE.Group();
     const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.72, r, 40), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
@@ -267,7 +352,7 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
 
   // ---------- Камера ----------
   const VIEWS = {
-    persp: { pos: [0, 12.5, 19], target: [0, 0, 1] },
+    persp: { pos: [0, 10.5, 15.5], target: [0, 0, 0.5] },
     top: { pos: [0, 27, 0.01], target: [0, 0, 0] },
     side: { pos: [17, 6.5, 0], target: [0, 1, 0] },
     behind: { pos: [0, 4.2, 14.5], target: [0, 1.6, -3] },
@@ -285,6 +370,15 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
   const ndc = new THREE.Vector2();
   const hover = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.26, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
   hover.rotation.x = -Math.PI / 2; hover.visible = false; scene.add(hover);
+  const pickables = () => [...[...players.values()].map(r => r.group.userData.body), ...hands.children.map(g => g.children.at(-1))];
+  // Во что попала мышь: игрок или руки блока (точку пола считаем всегда — она тоже нужна).
+  const pickHit = e => {
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const o = ray.intersectObjects(pickables(), false)[0]?.object;
+    return o ? (o.userData.pid ? { player: o.userData.pid } : { hands: o.userData.hands }) : null;
+  };
   const pick = e => {
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
@@ -301,14 +395,25 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
   renderer.domElement.addEventListener('pointerup', e => {
     if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
     const p = pick(e);
-    if (p) onPick?.(p, e);
+    if (p) onPick?.(p, e, pickHit(e));
   });
+  // Правая кнопка — альтернативное действие (например, «мяч подняли» вместо «очко»).
+  renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
   renderer.domElement.addEventListener('pointermove', e => {
     const p = pick(e);
-    hover.visible = !!p;
+    const hit = pickHit(e);
+    renderer.domElement.style.cursor = hit ? 'pointer' : 'crosshair';
+    hover.visible = !!p && !hit;
     if (p) { hover.position.copy(toWorld(p)); hover.position.y = 0.014; }
-    onHover?.(p && { ...p, zone: zoneOf(p) }, e);
+    onHover?.(p && { ...p, zone: zoneOf(p) }, e, hit);
   });
+  // Колесо: когда идёт ввод паса — меняет высоту дуги, иначе — обычный зум камеры.
+  let wheelCapture = false;
+  renderer.domElement.addEventListener('wheel', e => {
+    if (!wheelCapture) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    onWheel?.(Math.sign(e.deltaY), e);
+  }, { capture: true, passive: false });
   renderer.domElement.addEventListener('pointerleave', () => { hover.visible = false; onHover?.(null); });
 
   // ---------- Цикл отрисовки ----------
@@ -334,18 +439,41 @@ export function createCourt3D(el, { onPick, onHover } = {}) {
     }
     // Переходы игроков: фишки плавно едут в новые зоны при смене расстановки.
     for (const rec of players.values()) rec.group.position.lerp(rec.target, Math.min(1, dt * 5));
+    // Простая физика: фишки не входят друг в друга. Игрок у мяча (pinned) не сдвигается — расталкивает остальных.
+    const recs = [...players.values()], R = 0.72;
+    for (let it = 0; it < 3; it++) for (let i = 0; i < recs.length; i++) for (let j = i + 1; j < recs.length; j++) {
+      const a = recs[i].group.position, b = recs[j].group.position;
+      const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+      if (d >= R || d === 0) continue;
+      const push = R - d, nx = dx / d, nz = dz / d;
+      const wa = recs[i].pinned ? 0 : recs[j].pinned ? 1 : 0.5, wb = 1 - wa;
+      a.x -= nx * push * wa; a.z -= nz * push * wa;
+      b.x += nx * push * wb; b.z += nz * push * wb;
+    }
+    // Пульс подсветки.
+    const pulse = 0.55 + 0.4 * Math.sin(now / 160);
+    for (const rec of players.values()) rec.group.userData.glow.material.opacity = rec.hl ? pulse : 0;
     if (flight) {
-      flight.t += dt * 1.1;
-      if (flight.t >= 1) { flight.t = 0; flight.k = (flight.k + 1) % flight.curves.length; if (flight.k === 0) flight.pause = 0.6; }
-      if (flight.pause > 0) flight.pause -= dt;
-      else ball.position.copy(flight.curves[flight.k].getPointAt(Math.min(1, flight.t)));
+      flight.t += dt * 1.6;
+      // Мяч пролетает розыгрыш один раз и остаётся в последней точке.
+      if (flight.t >= 1) {
+        if (flight.k < flight.curves.length - 1) { flight.t = 0; flight.k++; } else flight.t = 1;
+      }
+      ball.position.copy(flight.curves[flight.k].getPointAt(Math.min(1, flight.t)));
     }
     controls.update();
     renderer.render(scene, camera);
   });
 
+  // Экранные координаты точки площадки (для всплывающих меню возле точки).
+  function project(p, h = 0) {
+    const v = toWorld(p, h).project(camera);
+    return { x: ((v.x + 1) / 2) * el.clientWidth, y: ((1 - v.y) / 2) * el.clientHeight };
+  }
+
   return {
-    setPlayers, setPending, setDots, setTrails, setView, resize,
+    setPlayers, setPending, setDots, setTrails, setView, resize, setHands, setPreview, project,
+    setWheelCapture: on => { wheelCapture = on; controls.enableZoom = !on; },
     toggleZones: on => { zoneGrid.visible = on ?? !zoneGrid.visible; return zoneGrid.visible; },
     dispose: () => { renderer.setAnimationLoop(null); renderer.dispose(); },
   };

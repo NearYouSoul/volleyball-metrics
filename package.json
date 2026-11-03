@@ -10,6 +10,7 @@
     "start:demo": "node server.js --data demo-data"
   },
   "dependencies": {
+    "ffmpeg-static": "^5.2.0",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {

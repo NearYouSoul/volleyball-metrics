@@ -14,7 +14,7 @@ export const ACTIONS = {
   set: { perfect: null, good: null, poor: null, error: 'them' },
   att: { kill: 'us', bo: 'us', play: null, error: 'them', blocked: 'them' },
   blk: { point: 'us', touch: null, out: 'them' },
-  dig: { plus: null, minus: null, error: 'them' },
+  dig: { plus: null, minus: null, over: null, error: 'them' },
   fault: { error: 'them' },
   // over/back — статист вручную говорит, где мяч, без статистики игрока.
   team: { oppError: 'us', oppKill: 'them', oppAce: 'them', over: null, back: null },
@@ -26,7 +26,7 @@ const NEXT_PHASE = {
   'serve.good': 'their', 'serve.in': 'their',
   'rec.pp': 'ours', 'rec.pm': 'ours', 'rec.p': 'ours', 'rec.over': 'their',
   'att.play': 'their', 'blk.touch': 'their',
-  'dig.plus': 'ours', 'dig.minus': 'ours',
+  'dig.plus': 'ours', 'dig.minus': 'ours', 'dig.over': 'their',
   'team.over': 'their', 'team.back': 'ours',
 };
 
@@ -36,7 +36,7 @@ export const LABELS = {
   set: { perfect: 'Пас: идеальный', good: 'Пас: хороший', poor: 'Пас: неудобный', error: 'Пас: ошибка' },
   att: { kill: 'Атака: забил', bo: 'Атака: блок-аут', play: 'Атака в игру', error: 'Атака: аут/сетка', blocked: 'Атака: заблокирован' },
   blk: { point: 'Блок: очко', touch: 'Блок: касание', out: 'Блок: блок-аут' },
-  dig: { plus: 'Защита +', minus: 'Защита −', error: 'Защита: не поднял' },
+  dig: { plus: 'Защита +', minus: 'Защита −', over: 'Защита: перекид', error: 'Защита: не поднял' },
   fault: { error: 'Ошибка (сетка/заступ/касания)' },
   team: { oppError: 'Ошибка соперника', oppKill: 'Соперник забил', oppAce: 'Эйс соперника', over: 'Мяч ушёл к ним', back: 'Мяч у нас' },
 };
@@ -54,7 +54,7 @@ export const newPlayer = () => ({
   set: { tot: 0, perfect: 0, good: 0, poor: 0, err: 0 },
   att: { tot: 0, kill: 0, bo: 0, err: 0, blk: 0 },
   blk: { point: 0, touch: 0, out: 0 },
-  dig: { tot: 0, plus: 0, minus: 0, err: 0 },
+  dig: { tot: 0, plus: 0, minus: 0, over: 0, err: 0 },
   fault: 0,
 });
 
@@ -211,7 +211,7 @@ export function replay(match, opts = {}) {
       case 'blk': eachPlayer(ev.p, p => p.blk[ev.res]++); break;
       case 'dig':
         eachPlayer(ev.p, p => { p.dig.tot++; p.dig[ev.res === 'error' ? 'err' : ev.res]++; });
-        if (ev.res !== 'error') rally.poss = { type: 'trans', q: ev.res, set: null };
+        if (ev.res !== 'error' && ev.res !== 'over') rally.poss = { type: 'trans', q: ev.res, set: null };
         break;
       case 'fault': eachPlayer(ev.p, p => p.fault++); break;
       case 'team':

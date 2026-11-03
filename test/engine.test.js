@@ -70,8 +70,8 @@ test('фазы: подача → у них → защита → у нас → а
   // «не поднял» — очко им, новый розыгрыш на их подаче, поэтому в конце 'rec'
   assert.deepEqual(phases, ['serve', 'ours', 'their', 'their', 'ours', 'rec']);
   const st = run([{ t: 'set', lineup, weServe: true }, ...steps]);
-  assert.deepEqual(st.players.all.c.dig, { tot: 1, plus: 1, minus: 0, err: 0 });
-  assert.deepEqual(st.players.all.a.dig, { tot: 1, plus: 0, minus: 0, err: 1 });
+  assert.deepEqual(st.players.all.c.dig, { tot: 1, plus: 1, minus: 0, over: 0, err: 0 });
+  assert.deepEqual(st.players.all.a.dig, { tot: 1, plus: 0, minus: 0, over: 0, err: 1 });
   assert.deepEqual(st.players.all.a.serve, { tot: 1, ace: 0, good: 0, err: 0 }); // подача в игру засчитана сама
 });
 

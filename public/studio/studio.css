@@ -122,7 +122,18 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 .pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .splitter { background: var(--line); cursor: col-resize; }
 .splitter:hover, .splitter.drag { background: var(--sky); }
-video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+/* Видео с зумом: масштабируем сам элемент, сдвиг — translate. */
+.vstage { position: absolute; inset: 0; overflow: hidden; cursor: default; }
+.vstage.zoomed { cursor: grab; }
+.vstage.zoomed.pan { cursor: grabbing; }
+video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; transform-origin: 0 0; will-change: transform; }
+.minimap { position: absolute; z-index: 2; right: 12px; bottom: 12px; width: 192px; height: 108px; border-radius: 8px; background: #000; box-shadow: 0 0 0 1px rgb(255 255 255 / .2), 0 8px 24px rgb(0 0 0 / .5); display: none; cursor: crosshair; }
+.minimap.on { display: block; }
+.zoomctl { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; padding: 2px; border-radius: 9px; background: var(--well); }
+.zoomctl .ibtn { width: 26px; height: 26px; font-size: 16px; font-weight: 600; }
+.zoomctl span { min-width: 44px; text-align: center; font: 500 12px var(--mono); color: var(--ash); }
+.vitem .bar2 { height: 4px; border-radius: 4px; background: var(--well); overflow: hidden; margin-top: 5px; }
+.vitem .bar2 i { display: block; height: 100%; background: var(--amber); transition: width .4s; }
 .video-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 24px; color: var(--ash); background: radial-gradient(60% 60% at 50% 40%, #16181c, #08090a); }
 .video-empty > svg { width: 44px; height: 44px; color: var(--smoke); }
 .video-empty b { color: var(--text); font-size: 16px; font-weight: 500; }
@@ -138,6 +149,20 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .court-hint span { background: rgb(17 18 21 / .82); backdrop-filter: blur(8px); padding: 5px 10px; border-radius: 7px; font-size: 12.5px; color: var(--ash); box-shadow: var(--key); }
 .court-hint span b { color: var(--text); font-weight: 500; }
 .court-hint .to { color: var(--coral); } .court-hint .from { color: var(--sky); }
+.court-hint { max-width: calc(100% - 250px); }
+.court-hint span { font-size: 12px; }
+.court-hint span { line-height: 1.5; }
+.court-hint .kbd { margin: 0 1px; }
+.court-hint .touches { display: inline-flex; gap: 4px; padding: 5px 7px; }
+.court-hint .touches i { font-style: normal; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; font: 600 11px var(--mono); color: var(--smoke); box-shadow: 0 0 0 1px var(--line-2); }
+.court-hint .touches i.done { background: rgb(89 212 153 / .18); color: var(--mint); box-shadow: none; }
+.court-hint .touches i.on { background: var(--amber); color: #1a1406; box-shadow: none; }
+.court-menu { position: absolute; z-index: 5; display: none; flex-direction: column; gap: 3px; min-width: 220px; padding: 5px; border-radius: 11px; background: rgb(22 23 27 / .96); backdrop-filter: blur(10px); box-shadow: 0 16px 40px rgb(0 0 0 / .55), var(--key-hi); animation: rise .12s; }
+.court-menu.on { display: flex; }
+.court-menu .cm-title { padding: 4px 8px 2px; font-size: 11.5px; color: var(--smoke); }
+.cm-item { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 10px 0 7px; border-radius: 7px; font-weight: 500; font-size: 13px; text-align: left; }
+.cm-item:hover, .cm-item:first-of-type { background: var(--raise); }
+.cm-item.g { color: var(--mint); } .cm-item.r { color: var(--coral); } .cm-item.y { color: var(--amber); }
 .court-hover { position: absolute; bottom: 10px; left: 10px; font: 12px var(--mono); color: var(--ash); background: rgb(17 18 21 / .75); padding: 4px 8px; border-radius: 6px; pointer-events: none; opacity: 0; transition: opacity .1s; }
 .court-hover.on { opacity: 1; }
 
@@ -361,3 +386,13 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
   .side { min-height: 480px; }
   .topbar { flex-wrap: wrap; padding: 8px 12px; height: auto; }
 }
+
+/* Конструктор зон доводки */
+.zbar { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.zbrush { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 8px; background: var(--well); box-shadow: var(--key); font-weight: 500; font-size: 13px; color: var(--ash); }
+.zbrush i { width: 12px; height: 12px; border-radius: 3px; }
+.zbrush.on { color: var(--text); box-shadow: 0 0 0 2px var(--text); }
+.zwrap { display: grid; place-items: center; }
+#zsvg { width: min(100%, 460px); height: auto; touch-action: none; cursor: crosshair; user-select: none; }
+#zsvg .zc { fill-opacity: .55; stroke: rgb(0 0 0 / .25); stroke-width: .015; }
+#zsvg .zc:hover { fill-opacity: .8; }

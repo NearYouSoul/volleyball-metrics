@@ -1,7 +1,7 @@
 // Веб-сервер на компьютере: отдаёт страницы и хранит матчи в папке data/.
 // Телефон — только пульт: каждое нажатие сразу уходит сюда и сохраняется на диск.
 import http from 'node:http';
-import { readFile, writeFile, rename, mkdir, readdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, readdir, stat, unlink } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { networkInterfaces } from 'node:os';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { replay } from './public/engine.js';
 import { replayQuick } from './public/quick-engine.js';
+import { hasFfmpeg, probe, plan, convert } from './media.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -170,19 +171,32 @@ async function api(req, url) {
   }
 
   // ---------- Видеотека ----------
-  if (route === 'GET /api/videos') return readJson(videosFile, []);
+  // Прогресс подготовки видео живёт в памяти — подмешиваем его в список.
+  if (route === 'GET /api/videos') return (await readJson(videosFile, [])).map(v => (jobs.has(v.id) ? { ...v, progress: jobs.get(v.id) } : v));
   // Загрузка: тело запроса — сам файл, имя — в заголовке X-Filename. Пишем потоком: файлы бывают по несколько гигабайт.
   if (route === 'POST /api/videos') {
     const name = decodeURIComponent(req.headers['x-filename'] || 'video.mp4');
-    const ext = path.extname(name).toLowerCase();
-    if (!VIDEO_EXT.has(ext)) { req.resume(); return { error: `Формат ${ext || '?'} не поддерживается. Нужен mp4, mov, webm или mkv.` }; }
+    const ext = path.extname(name).toLowerCase() || '.mp4';
+    // Без FFmpeg берём только то, что браузер играет сам; с FFmpeg — что угодно.
+    if (!hasFfmpeg() && !VIDEO_EXT.has(ext)) { req.resume(); return { error: `Формат ${ext} не поддерживается. Нужен mp4, mov, webm или mkv.` }; }
+    if (!/^\.[a-z0-9]{1,5}$/.test(ext)) { req.resume(); return { error: 'Непонятное расширение файла' }; }
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
     const file = `${id}${ext}`;
     await pipeline(req, createWriteStream(path.join(VIDEOS, file + '.part')));
     await rename(path.join(VIDEOS, file + '.part'), path.join(VIDEOS, file));
     const { size } = await stat(path.join(VIDEOS, file));
-    const video = { id, name, file, size, created: new Date().toISOString() };
-    return serial(async () => { const list = await readJson(videosFile, []); list.unshift(video); await writeJson(videosFile, list); return video; });
+    const video = { id, name, file, size, created: new Date().toISOString(), status: 'ready' };
+    if (hasFfmpeg()) {
+      try {
+        const info = await probe(path.join(VIDEOS, file));
+        Object.assign(video, { codec: info.vcodec, width: info.width, height: info.height, ...(info.duration && { duration: info.duration }) });
+        const mode = plan(info, ext);
+        if (mode !== 'ready') Object.assign(video, { status: 'processing', mode, source: file });
+      } catch (e) { console.error('  Не удалось прочитать видео:', e.message); }
+    }
+    await serial(async () => { const list = await readJson(videosFile, []); list.unshift(video); await writeJson(videosFile, list); });
+    if (video.status === 'processing') enqueue(video.id);
+    return video;
   }
   const vm = url.pathname.match(/^\/api\/videos\/([a-z0-9]+)$/);
   if (vm && req.method === 'PATCH') {
@@ -272,6 +286,43 @@ async function api(req, url) {
   return null;
 }
 
+// ---------- Очередь подготовки видео (по одному файлу за раз) ----------
+const jobs = new Map(); // id → прогресс 0…1
+let chain = Promise.resolve();
+function enqueue(id) {
+  jobs.set(id, 0);
+  chain = chain.then(() => prepareVideo(id)).catch(e => console.error(e));
+}
+async function patchVideo(id, patch) {
+  return serial(async () => {
+    const list = await readJson(videosFile, []);
+    const v = list.find(x => x.id === id);
+    if (v) Object.assign(v, patch);
+    await writeJson(videosFile, list);
+    return v;
+  });
+}
+async function prepareVideo(id) {
+  const v = (await readJson(videosFile, [])).find(x => x.id === id);
+  if (!v || v.status !== 'processing') return jobs.delete(id);
+  const src = path.join(VIDEOS, v.source), out = `${id}.mp4`, tmp = path.join(VIDEOS, `${id}.tmp.mp4`);
+  console.log(`  Видео «${v.name}»: ${v.mode === 'remux' ? 'переупаковка' : 'перекодирование в H.264'}…`);
+  try {
+    const info = await probe(src);
+    await convert(src, tmp, info, v.mode, p => jobs.set(id, p));
+    await rename(tmp, path.join(VIDEOS, out));
+    if (v.source !== out) await unlink(src).catch(() => {});
+    const { size } = await stat(path.join(VIDEOS, out));
+    await patchVideo(id, { status: 'ready', file: out, size, source: undefined, ...(info.duration && { duration: info.duration }) });
+    console.log(`  Видео «${v.name}» готово.`);
+  } catch (e) {
+    console.error(`  Видео «${v.name}»: ошибка FFmpeg —`, e.message);
+    await unlink(tmp).catch(() => {});
+    await patchVideo(id, { status: 'error', error: e.message.slice(0, 200), file: v.source });
+  }
+  jobs.delete(id);
+}
+
 // Видео отдаём кусками (Range): без этого браузер не умеет перематывать.
 async function sendVideo(req, res, name) {
   const file = path.join(VIDEOS, path.basename(name));
@@ -312,6 +363,9 @@ const server = http.createServer(async (req, res) => {
     if (!notFound) console.error(e);
   }
 });
+
+// Подготовка видео прервалась (закрыли окно сервера) — продолжаем после запуска.
+for (const v of await readJson(videosFile, [])) if (v.status === 'processing' && hasFfmpeg()) enqueue(v.id);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Статистика волейбола запущена`);
