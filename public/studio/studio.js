@@ -44,12 +44,18 @@ async function call(fn) {
   render();
 }
 let toastTimer;
-function toast(text, err = false) {
+function toast(text, err = false, action = null) {
   const t = $('toast');
   t.textContent = text;
-  t.className = 'toast on' + (err ? ' err' : '');
+  if (action) {
+    const b = document.createElement('button');
+    b.textContent = action.label; b.className = 'toast-act';
+    b.onclick = () => { t.className = 'toast'; action.fn(); };
+    t.append(b);
+  }
+  t.className = 'toast on' + (err ? ' err' : '') + (action ? ' act' : '');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.className = 'toast'), 2600);
+  toastTimer = setTimeout(() => (t.className = 'toast'), action ? 6000 : 2600);
 }
 
 function setMatch(match) {
@@ -488,6 +494,31 @@ function ballDown() {
   else if (st === 'their' || st === 'free') sendAct('team', 'oppKill');
 }
 
+// Удаление событий (одного или целого розыгрыша): сразу на экране, на сервер — очередью, с возможностью вернуть.
+function deleteEvents(idxs) {
+  const id = ui.match.id;
+  const sorted = [...new Set(idxs)].sort((a, b) => b - a);
+  const removed = sorted.map(i => ({ i, ev: ui.match.events[i] })).filter(x => x.ev);
+  for (const { i } of removed) {
+    ui.match.events.splice(i, 1);
+    if (ui.insertAt !== null && ui.insertAt > i) ui.insertAt--;
+    queue(() => api('DELETE', `/api/matches/${id}/events/${i}`));
+  }
+  ui.edit = null; ui.draft = null; ui.focusRally = null;
+  recompute(); render();
+  toast(removed.length > 1 ? `Розыгрыш удалён (${removed.length} касаний)` : 'Событие удалено', false, {
+    label: 'Вернуть',
+    fn: () => {
+      // Возвращаем в обратном порядке удаления — каждое на своё место.
+      for (const { i, ev } of [...removed].reverse()) {
+        ui.match.events.splice(i, 0, ev);
+        queue(() => api('POST', `/api/matches/${id}/events?at=${i}`, ev));
+      }
+      recompute(); render();
+    },
+  });
+}
+
 // ---------- Всплывающее меню возле точки ----------
 function openMenu(p, h, items, title = '') {
   const pos = court.project(p, h);
@@ -802,10 +833,10 @@ function sideEvents() {
     if (r.ev.t === 'set') { curSet++; items.push(`<div class="ev-div">Партия ${curSet + 1}</div>`); }
     const cls = [r.l.side || '', r.ev.t !== 'act' && r.ev.t !== 'pt' ? 'sys' : '', ui.edit === r.i ? 'sel' : '', ui.insertAt === r.i ? 'cursor' : '', ui.playlist?.items[ui.playlist.k]?.i === r.i ? 'playing' : ''].join(' ');
     const ic = [r.ev.to || r.ev.from ? icon('i-pin') : '', r.ev.v && r.ev.v !== ui.activeVideo ? icon('i-film') : ''].join('');
-    items.push(`<div class="ev ${cls}" data-a="pickEv" data-i="${r.i}">
+    items.push(`<div class="ev has-del ${cls}" data-a="pickEv" data-i="${r.i}">
       <span class="t ${r.ev.vt == null ? 'none' : ''}">${r.ev.vt == null ? '—' : fmtShort(r.ev.vt)}</span>
       <span class="sc">${r.i + 1}</span>
-      <span class="tx">${esc(r.l.text)}</span><span class="ic">${ic}</span></div>`);
+      <span class="tx">${esc(r.l.text)}</span><span class="ic">${ic}</span><button class="rowdel" data-a="evDelQuick" data-i="${r.i}" title="Удалить событие">${icon('i-x')}</button></div>`);
     if (ui.edit === r.i) items.push(editor(r));
     void setNo;
   }
@@ -864,7 +895,8 @@ function sideMatch() {
   const m = ui.match, st = ui.st;
   const list = ui.matches.map(x => `<div class="mitem ${m?.id === x.id ? 'on' : ''}" data-a="open" data-id="${x.id}">
     <span class="grow"><b>${esc(x.opponent)}</b><small>${new Date(x.created).toLocaleDateString('ru')} · событий ${x.events}${x.videos.length ? ' · видео ' + x.videos.length : ''}</small></span>
-    <span class="sc">${x.setsWon.us}:${x.setsWon.them}</span></div>`).join('');
+    <span class="sc">${x.setsWon.us}:${x.setsWon.them}</span>
+    <button class="rowdel" data-a="matchDel" data-id="${x.id}" title="Удалить матч">${icon('i-x')}</button></div>`).join('');
   const sys = m ? Object.entries(SYSTEMS).map(([k, v]) => `<option value="${k}" ${m.system === k ? 'selected' : ''}>${v}</option>`).join('') : '';
   return `
     ${m ? `<h3>Текущий матч</h3>
@@ -1133,7 +1165,7 @@ function paintFormEditor() {
     <p>Перетащите игроков: как команда стоит в каждой расстановке. В <b>Р${f.rot}</b> связующий — в зоне ${f.rot}.
       Атака одинаковая для всех расстановок: нападающие разбегаются, связующий выходит к сетке — это программа делает сама.</p>
     <div class="fbar"><div class="seg">${Object.entries(SITUATIONS).map(([k, v]) => `<button class="${f.kind === k ? 'on' : ''}" data-a="fKind" data-v="${k}">${v}</button>`).join('')}</div>
-      <div class="seg">${[1, 2, 3, 4, 5, 6].map(r => `<button class="${f.rot === r ? 'on' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}</div></div>
+      <div class="seg" title="В порядке переходов: игроки идут по часовой стрелке, номер расстановки — против">${[1, 6, 5, 4, 3, 2].map(r => `<button class="${f.rot === r ? 'on' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}</div></div>
     <div class="zwrap"><svg id="fsvg" viewBox="-1.6 -1.1 12.2 13.4">
       <rect x="0" y="0" width="9" height="9" fill="#1d3a57"/>
       <rect x="0" y="0" width="9" height="3" fill="rgb(255 255 255 / .04)"/>
@@ -1279,7 +1311,8 @@ function sideRallies() {
     html += `<div class="${cls}" data-a="pickRally" data-k="${r.key}">
       <span class="t ${r.t0 == null ? 'none' : ''}">${r.t0 == null ? '—' : fmtShort(r.t0)}</span>
       <span class="sc">${r.after ? r.after.join(':') : '…'}</span>
-      <span class="body"><b>${r.won === true ? 'Очко нам' : r.won === false ? 'Очко им' : 'Идёт'}</b> · Р${r.rot} · ${r.weServe ? 'наша подача' : 'приём'}<small>${esc(rallySummary(r))}</small></span></div>`;
+      <span class="body"><b>${r.won === true ? 'Очко нам' : r.won === false ? 'Очко им' : 'Идёт'}</b> · Р${r.rot} · ${r.weServe ? 'наша подача' : 'приём'}<small>${esc(rallySummary(r))}</small></span>
+      <button class="rowdel" data-a="rallyDel" data-k="${r.key}" title="Удалить розыгрыш целиком">${icon('i-x')}</button></div>`;
   }
   return html || '<p class="muted">Розыгрышей пока нет.</p>';
 }
@@ -1691,6 +1724,19 @@ const H = {
   evTime: () => updateEvent(ui.edit, { v: ui.activeVideo, vt: +video.currentTime.toFixed(2) }),
   evPoints: () => { ui.editPoints = !ui.editPoints; render(); },
   evClearPts: () => updateEvent(ui.edit, { to: undefined, from: undefined }),
+  // Быстрое удаление без вопросов — с кнопкой «Вернуть» во всплывающей подсказке.
+  evDelQuick: d => deleteEvents([+d.i]),
+  rallyDel: d => { const r = rallyByKey(d.k); if (r) deleteEvents(r.plays.map(p => p.i)); },
+  matchDel: d => {
+    const x = ui.matches.find(m => m.id === d.id);
+    if (!confirm(`Удалить матч с «${x.opponent}» (${new Date(x.created).toLocaleDateString('ru')})? Файл переедет в data/trash.`)) return;
+    call(async () => {
+      await api('DELETE', `/api/matches/${d.id}`);
+      ui.matches = await api('GET', '/api/matches');
+      if (ui.match?.id === d.id) { ui.match = null; ui.full = ui.st = null; history.replaceState(null, '', location.pathname); }
+      toast('Матч удалён (лежит в data/trash)');
+    });
+  },
   evDel: d => {
     if (!confirm(`Удалить событие №${+d.i + 1}? Счёт и статистика пересчитаются.`)) return;
     const i = +d.i;
