@@ -1085,13 +1085,28 @@ function openLineup() {
   ui.lineupDraft = { order: from ? from.start.filter(id => ui.match.roster.some(p => p.id === id)) : [], weServe: true, setter: from?.main ?? null };
   paintLineup();
 }
+// Порядок подачи из состава пресета так, чтобы партия началась в расстановке rot (связующий в зоне rot).
+// Подаём мы — первым подаёт тот, кто в зоне 1; подаёт соперник — он же будет последним в порядке (подавал «до нас»).
+function lineupFromPreset(rot, weServe) {
+  const pl = curPreset().lineup;
+  if (pl?.start?.length !== 6) return null;
+  const ms = Math.max(0, pl.start.indexOf(pl.main));
+  const k = [0, 1, 2, 3, 4, 5].find(z1 => zoneOfSlot(ms, z1) === rot); // слот, который стоит в зоне 1
+  const first = weServe ? k : (k + 1) % 6;
+  return { order: [0, 1, 2, 3, 4, 5].map(i => pl.start[(first + i) % 6]), setter: pl.main };
+}
 function paintLineup() {
   const d = ui.lineupDraft, n = ui.st.sets.length + 1;
+  const pl = curPreset().lineup;
+  const fromPreset = pl?.start?.length === 6 ? `<div class="field">Старт из пресета «${esc(curPreset().name)}» — нажмите расстановку, порядок подачи посчитается сам
+      <div class="seg">${[1, 6, 5, 4, 3, 2].map(r => `<button class="${d.fromRot === r ? 'on' : ''}" data-a="lrot" data-v="${r}">Р${r}</button>`).join('')}</div></div>`
+    : `<p class="muted" style="margin-top:-6px">Совет: задайте состав пресета в редакторе расстановок — тогда партию можно начинать одной кнопкой Р1–Р6.</p>`;
   const roster = [...ui.match.roster].sort((a, b) => a.num - b.num);
   const chosen = d.order.map(id => person(id));
   const setterOpts = chosen.map(p => `<option value="${p.id}" ${(d.setter ?? chosen.find(c => c.setter)?.id) === p.id ? 'selected' : ''}>${esc(playerName(ui.match, p.id))}${p.setter ? ' · связ.' : ''}</option>`).join('');
   modal(`<h2>${n === 3 ? 'Тай-брейк (до 15)' : `Партия ${n}`} — ${esc(ui.match.opponent)}</h2>
-    <p>Нажимайте игроков <b>в порядке подачи</b>: 1 — подаёт первым. Повторное нажатие убирает.</p>
+    ${fromPreset}
+    <p>${pl?.start?.length === 6 ? 'Или вручную: н' : 'Н'}ажимайте игроков <b>в порядке подачи</b>: 1 — подаёт первым. Повторное нажатие убирает.</p>
     <div class="grid">${roster.map(p => {
       const k = d.order.indexOf(p.id);
       return `<button class="ptile ${k >= 0 ? 'on' : ''}" data-a="lpick" data-id="${p.id}">${k >= 0 ? `<span class="ord">${k + 1}</span>` : ''}
@@ -1220,6 +1235,7 @@ const nextRot = r => GAME_ORDER[(GAME_ORDER.indexOf(r) + 1) % 6];
 // Игроки по слотам (порядок подачи): номера — из стартового состава последней партии, если она есть.
 function refSlots() {
   const pl = ui.fEdit ? editPreset()?.lineup : curPreset().lineup;
+  // Связующий в зоне текущей расстановки определяет, как «повёрнут» состав, — ms по пресету.
   if (pl?.start?.length === 6) return { start: pl.start, ms: Math.max(0, pl.start.indexOf(pl.main)) };
   const set = ui.st?.sets.at(-1);
   return set && set.mainSlot >= 0 ? { start: set.start, ms: set.mainSlot } : { start: null, ms: 0 };
@@ -1243,6 +1259,32 @@ function openFormEditor() {
   paintFormEditor();
 }
 const editPreset = () => ui.fEdit?.works.find(w => w.id === ui.fEdit.presetId);
+// Состав пресета по зонам текущей расстановки: выбираете игрока в каждую зону — остальные переходы считаются по кругу.
+function teamRoster() { return [...(ui.match?.roster ?? ui.roster)].sort((a, b) => a.num - b.num); }
+function ensurePresetLineup() {
+  const w = editPreset();
+  if (w.lineup?.start?.length === 6) return w.lineup;
+  const { start } = refSlots();
+  const roster = teamRoster();
+  const ids = start ?? roster.slice(0, 6).map(p => p.id);
+  while (ids.length < 6) ids.push(null);
+  w.lineup = { start: ids, main: ids.find(id => roleOf(person(id) ?? roster.find(p => p.id === id)) === 's') ?? ids[0] };
+  return w.lineup;
+}
+function rosterPanel(f) {
+  const lu = ensurePresetLineup();
+  const ms = Math.max(0, lu.start.indexOf(lu.main));
+  const roster = teamRoster();
+  const cell = z => {
+    const sl = [0, 1, 2, 3, 4, 5].find(s => slotZone(s, f.rot, ms) === z);
+    const cur = lu.start[sl];
+    return `<label class="rz"><span>зона ${z}${sl === ms ? ' · связующий' : ''}</span>
+      <select data-k="fSlot" data-slot="${sl}">${roster.map(p => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>#${esc(p.num)} ${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</option>`).join('')}</select></label>`;
+  };
+  return `<div class="rpanel"><p class="muted" style="margin:0 0 8px">Кто где стоит в <b>Р${f.rot}</b>. Задайте один раз — в остальных переходах игроки встанут по кругу.
+      Связующий (по нему считаются Р1–Р6): <select data-k="fMain">${lu.start.filter(Boolean).map(id => { const p = roster.find(x => x.id === id); return `<option value="${id}" ${id === lu.main ? 'selected' : ''}>#${esc(p?.num)} ${esc(p?.name)}</option>`; }).join('')}</select></p>
+    <div class="rgrid">${[4, 3, 2, 5, 6, 1].map(cell).join('')}</div></div>`;
+}
 // Поля редактора смотрят в рабочую копию выбранного пресета.
 function bindPreset() { const w = editPreset(); Object.assign(ui.fEdit, { data: w.data, touched: w.touched, inherited: w.inherited }); }
 const isTouched = (f, k, r) => !!f.touched[k]?.[r];
@@ -1271,7 +1313,7 @@ function paintFormEditor(fromRot = null) {
   const tokens = [0, 1, 2, 3, 4, 5].map(sl => {
     const z = slotZone(sl, f.rot, ms), p = tab[z];
     const o = oldTab ? oldTab[slotZone(sl, fromRot, ms)] : p;
-    const id = start?.[sl], pl = id ? person(id) : null;
+    const id = start?.[sl], pl = id ? (person(id)?.id ? person(id) : ui.roster.find(p => p.id === id)) : null;
     const role = pl ? ROLES[roleOf(pl)]?.short ?? '' : sl === ms ? 'СВ' : '';
     return `<g class="ftok ${z === f.rot ? 'setter' : ''} ${legal?.bad.has(z) ? 'bad' : ''}" data-z="${z}" data-tx="${p.x} ${sy(p.y)}" style="transform: translate(${o.x}px, ${sy(o.y)}px)">
       <circle r=".46"/><text class="n" y=".15">${pl ? esc(pl.num || pl.name.slice(0, 2)) : z}</text>
@@ -1289,8 +1331,10 @@ function paintFormEditor(fromRot = null) {
       <button class="btn sm ghost" data-a="fRename">Переименовать</button>
       ${f.works.length > 1 ? '<button class="btn sm ghost danger" data-a="fDel">Удалить</button>' : ''}
       <span class="grow"></span>
-      ${ui.st?.sets.length ? '<button class="btn sm ghost" data-a="fTakeLineup" title="Номера на фишках — из стартового состава этого матча">Состав из матча</button>' : ''}
+      <button class="btn sm ${f.showRoster ? 'primary' : ''}" data-a="fRoster" title="Кто где стоит — для всех переходов пресета">Состав пресета</button>
+      ${ui.st?.sets.length ? '<button class="btn sm ghost" data-a="fTakeLineup" title="Номера на фишках — из стартового состава этого матча">Из матча</button>' : ''}
     </div>
+    ${f.showRoster ? rosterPanel(f) : ''}
     <p>Перетащите игроков: как команда стоит в каждой расстановке (игровые позиции; «зона N» на фишке — где игрок по протоколу).
       В <b>Р${f.rot}</b> связующий — в зоне ${f.rot}. В защите задайте базовую расстановку — под блок слева / по центру / справа команда
       перестроится сама: кто левее, центральнее и правее в передней и задней линии, тот и займёт своё место.</p>
@@ -1820,6 +1864,7 @@ const H = {
     if (!confirm(`Удалить пресет «${w.name}»?`)) return;
     f.works = f.works.filter(x => x !== w); f.presetId = f.works[0].id; bindPreset(); paintFormEditor();
   },
+  fRoster: () => { ui.fEdit.showRoster = !ui.fEdit.showRoster; paintFormEditor(); },
   fTakeLineup: () => {
     const set = ui.st?.sets.at(-1);
     if (!set) return;
@@ -1879,11 +1924,18 @@ const H = {
   subIn: d => { const out = ui.sub.out; ui.sub = null; sendRaw({ t: 'sub', out, in: d.id }); },
   lineup: openLineup,
   lpick: d => {
+    ui.lineupDraft.fromRot = null;
     const o = ui.lineupDraft.order, k = o.indexOf(d.id);
     if (k >= 0) o.splice(k, 1); else if (o.length < 6) o.push(d.id);
     paintLineup();
   },
-  lserve: d => { ui.lineupDraft.weServe = d.v === '1'; paintLineup(); },
+  lserve: d => {
+    const ld = ui.lineupDraft;
+    ld.weServe = d.v === '1';
+    if (ld.fromRot) Object.assign(ld, lineupFromPreset(ld.fromRot, ld.weServe)); // кто подаёт — меняет порядок, но не расстановку
+    paintLineup();
+  },
+  lrot: d => { const ld = ui.lineupDraft; ld.fromRot = +d.v; Object.assign(ld, lineupFromPreset(ld.fromRot, ld.weServe)); paintLineup(); },
   lstart: () => {
     const d = ui.lineupDraft;
     const setter = d.order.includes(d.setter) ? d.setter : d.order.find(id => person(id).setter) ?? null;
@@ -1960,6 +2012,23 @@ document.addEventListener('change', e => {
   if (k === 'lsetter') ui.lineupDraft.setter = v;
   if (k === 'fPreset') { ui.fEdit.presetId = v; bindPreset(); paintFormEditor(); }
   if (k === 'fSystem') { editPreset().system = v; }
+  if (k === 'fSlot') {
+    // Игрок уже стоит в другой зоне — меняем их местами.
+    const lu = ensurePresetLineup(), sl = +e.target.dataset.slot, other = lu.start.indexOf(v);
+    if (other >= 0 && other !== sl) lu.start[other] = lu.start[sl];
+    lu.start[sl] = v;
+    if (!lu.start.includes(lu.main)) lu.main = v;
+    paintFormEditor();
+  }
+  if (k === 'fMain') {
+    // Связующий — по нему нумеруются расстановки; меняем, сохраняя, кто в какой зоне текущей Р стоит.
+    const f = ui.fEdit, lu = ensurePresetLineup();
+    const oldMs = Math.max(0, lu.start.indexOf(lu.main));
+    const zoneOf = {}; lu.start.forEach((id, s) => (zoneOf[id] = slotZone(s, f.rot, oldMs)));
+    lu.main = v;
+    f.rot = zoneOf[v]; // та же картина на площадке — теперь это Р по зоне нового связующего
+    paintFormEditor();
+  }
   if (k === 'matchPreset') { const pr = presetById(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { preset: v, system: pr.system || ui.match.system }))); }
   if (k === 'eres') updateEvent(ui.edit, { res: v });
   if (k === 'ep') updateEvent(ui.edit, { p: v || null });
