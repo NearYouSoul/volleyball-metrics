@@ -257,6 +257,11 @@ const court = createCourt3D($('court3d'), {
     paintPreview(); paintBar(); paintDock(); paintHud();
   },
 });
+// Подписи над игроками: номер / имя / как записан / без подписи (запоминается).
+const LABEL_ICON = { num: '№', name: 'Аб', full: '№А', none: '–' };
+function paintLabelBtn() { const b = $('labelBtn'); if (b) b.querySelector('b').textContent = LABEL_ICON[store.get('labelMode', 'num')] ?? '№'; }
+court.setLabelMode(store.get('labelMode', 'num'));
+paintLabelBtn();
 
 const inCourtUs = p => p.x >= 0 && p.x <= 9 && p.y >= 0 && p.y < NET;
 const inCourtThem = p => p.x >= 0 && p.x <= 9 && p.y >= NET && p.y <= 18;
@@ -742,7 +747,7 @@ function paintPlayers() {
   const actorId = c?.stage === 'touch2' ? c.touch.p : c?.stage === 'set' || c?.stage === 'att' ? c.p : a?.kind === 'setter' ? a.touch.p : a?.kind === 'attacker' ? a.set.p : null;
   court.setPlayers(st.set.lineup.map(id => {
     const p = person(id);
-    return { id, act: ui.acts[id], label: p.num || (p.name || '?').slice(0, 2), spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
+    return { id, act: ui.acts[id], label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
   }));
 }
 
@@ -1862,7 +1867,7 @@ function replayPlayers(r, t) {
     const z = zones[k], p = person(id);
     let spot = kind === 'att' ? (F.touched?.att?.[rot] ? spotFor(F, 'att', rot, z) : attRole[id]) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st0.rally.server === id && !last) spot = { x: 7.6, y: -0.9 };
-    return { id, label: p.num || (p.name || '?').slice(0, 2), spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
+    return { id, label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
   });
 }
 let replayKey = null;
@@ -2125,6 +2130,12 @@ const H = {
   modalBg: (d, e) => { if (e.target.classList.contains('modal-bg')) modal(''); },
   pickFile: () => $('fileInput').click(),
   view: d => { court.setView(d.v); document.querySelectorAll('[data-a=view]').forEach(b => b.classList.toggle('on', b.dataset.v === d.v)); },
+  labelMode: () => {
+    const order = ['num', 'name', 'full', 'none'], names = { num: 'номер', name: 'имя', full: 'как записан в составе', none: 'без подписи' };
+    const m = order[(order.indexOf(store.get('labelMode', 'num')) + 1) % order.length];
+    store.set('labelMode', m); court.setLabelMode(m); paintLabelBtn();
+    toast('Над игроками: ' + names[m]);
+  },
   zones: (d, e) => { const on = court.toggleZones(); e.target.closest('button').classList.toggle('on', on); },
   // Кнопка пуска — «ручное» управление: на паузе видео само не поедет, пока не нажмёте снова.
   play: () => {
@@ -2595,7 +2606,7 @@ addEventListener('drop', e => {
 $('fileInput').addEventListener('change', e => { uploadFiles([...e.target.files]); e.target.value = ''; });
 
 // Для отладки из консоли браузера: studio.ui, studio.court.
-window.studio = { ui, court, rallies, ballKeys, ballAt, replayPlayers };
+window.studio = { ui, court, rallies, ballKeys, ballAt, replayPlayers, repaint: () => paintPlayers() };
 
 // ---------- Старт ----------
 setLayout(store.get('layout', 'split'));

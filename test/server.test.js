@@ -86,3 +86,13 @@ test('сервер: резервная копия, восстановление,
   assert.equal((await api('GET', `/api/matches/${m.id}`)).json.id, m.id);
   assert.ok((await api('GET', '/api/backups')).json.length >= 2); // автокопия при запуске + ручная + перед восстановлением
 });
+
+test('сервер: скаутинг — опция матча, номер соперника в событии', async () => {
+  const m = (await api('POST', '/api/matches', { opponentId: 'x' })).json;
+  assert.ok(!m.scout); // по умолчанию выключен
+  assert.equal((await api('PATCH', `/api/matches/${m.id}`, { scout: true })).json.scout, true);
+  await api('POST', `/api/matches/${m.id}/events`, { t: 'set', lineup: ['a', 'b', 'c', 'd', 'e', 'f'], weServe: false });
+  const ev = (await api('POST', `/api/matches/${m.id}/events`, { t: 'act', skill: 'rec', res: 'pp', p: 'b', opp: '7' })).json;
+  assert.equal(ev.events.at(-1).opp, '7');
+  assert.equal((await api('PATCH', `/api/matches/${m.id}`, { scout: false })).json.scout, false);
+});
