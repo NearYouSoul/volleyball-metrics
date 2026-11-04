@@ -175,7 +175,7 @@ function btn(cls, skill, res, text, p = null) {
 
 // Группы действий игрока. Главная группа зависит от фазы, остальные — под «Другое».
 const GROUPS = {
-  rec: p => ['Приём', [btn('g', 'rec', 'pp', '++', p), btn('y', 'rec', 'pm', '+−', p), btn('n', 'rec', 'p', '+', p), btn('y', 'rec', 'over', 'Перекид', p), btn('r', 'rec', 'error', 'Не принял', p)]],
+  rec: p => ['Приём', [btn('g', 'rec', 'pp', '++', p), btn('y', 'rec', 'pm', '+', p), btn('n', 'rec', 'p', '−', p), btn('y', 'rec', 'over', 'Перекид', p), btn('r', 'rec', 'error', 'Не принял', p)]],
   att: p => ['Атака', [btn('g', 'att', 'kill', 'Забил', p), btn('g', 'att', 'bo', 'От блока', p), btn('n', 'att', 'play', 'В игре', p),
     btn('r', 'att', 'error', 'Аут / сетка', p), btn('r', 'att', 'blocked', 'Заблокир.', p)]],
   def: p => ['Защита и блок', [btn('g', 'blk', 'point', 'Блок: очко', p), btn('n', 'dig', 'plus', 'Защита +', p), btn('y', 'dig', 'minus', 'Защита −', p),

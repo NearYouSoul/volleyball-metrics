@@ -19,7 +19,7 @@ const DIR_ORDER = ['4', '3', '2', 'pipe', 'back', 'dump'];
 const DIR_COLOR = { 4: '#3f86e8', 3: '#b8892a', 2: '#8a6ee0', pipe: '#1f9b90', back: '#d06a28', dump: '#7d8089' };
 const dirKey = d => (d === 1 || d === 5 || d === '1' || d === '5' ? 'back' : d == null ? null : String(d));
 const OUT_COLOR = { us: '#59d499', them: '#ff6363', null: '#a0a3aa' };
-const REC_LABEL = { pp: '++', pm: '+−', p: '+', trans: 'Переход' };
+const REC_LABEL = { pp: '++', pm: '+', p: '−', trans: 'Переход' };
 
 let F = { tour: 'all', opp: 'all', match: null, set: 'all', player: 'all', rot: 'all', phase: 'all', skill: 'att', dots: true, heat: true, traj: false, setter: null, sort: 'points' };
 let DATA = null;
@@ -116,7 +116,7 @@ function overview(v) {
       ${kpi('Атака', pc(k, att.length), att.length ? `эфф ${sgn(Math.round((100 * (k - e - b)) / att.length))}% · ${k} очков, ${e} ош, ${b} блок из ${att.length}` : 'атак нет',
         bar([{ n: k, c: OUT_COLOR.us, t: 'Очко' }, { n: att.length - k - e - b, c: '#3a3d44', t: 'В игре' }, { n: e + b, c: OUT_COLOR.them, t: 'Ошибка / блок' }]))}
       ${kpi('Приём', rr == null ? '–' : `${rr.toFixed(2)}<small>из 3</small>`, `позитив ${pc(rcnt('pp') + rcnt('pm'), rec.length)} · идеал ${pc(rcnt('pp'), rec.length)} · ош ${rcnt('error')}`,
-        bar([{ n: rcnt('pp'), c: '#59d499', t: '++' }, { n: rcnt('pm'), c: '#3f86e8', t: '+−' }, { n: rcnt('p') + rcnt('over'), c: '#b8892a', t: '+ / перекид' }, { n: rcnt('error'), c: '#ff6363', t: 'Ошибка' }]))}
+        bar([{ n: rcnt('pp'), c: '#59d499', t: '++' }, { n: rcnt('pm'), c: '#3f86e8', t: '+' }, { n: rcnt('p') + rcnt('over'), c: '#b8892a', t: '− / перекид' }, { n: rcnt('error'), c: '#ff6363', t: 'Ошибка' }]))}
       ${kpi('Пас', sets.length ? pc(scnt('perfect') + scnt('good'), sets.length) : '–', `хороший и идеальный · отмечено пасов ${sets.length}`,
         bar([{ n: scnt('perfect'), c: '#59d499', t: 'Идеальный' }, { n: scnt('good'), c: '#3f86e8', t: 'Хороший' }, { n: scnt('poor'), c: '#b8892a', t: 'Неудобный' }, { n: scnt('error'), c: '#ff6363', t: 'Ошибка' }]))}
       ${kpi('Подача', `${sum.serve.ace}<small>эйс</small> ${sum.serve.err}<small>ош</small>`, `сложных ${sum.serve.good} · всего ${sum.serve.tot}`)}
