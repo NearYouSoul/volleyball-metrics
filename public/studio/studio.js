@@ -1247,7 +1247,7 @@ function openHelp() {
       ${k(['V'], 'раскладка: видео / обе / площадка')}
       ${k(['?'], 'эта справка')}
     </div>
-    <div class="foot"><button class="btn primary" data-a="modalClose">Понятно</button></div>`);
+    <div class="foot"><button class="btn ghost" data-a="tourStart">Пройти обучение</button><span class="grow"></span><button class="btn primary" data-a="modalClose">Понятно</button></div>`);
 }
 
 
@@ -1587,6 +1587,47 @@ async function afterRestore(msg) {
   await openDataModal();
   toast(msg);
 }
+
+
+// ---------- Обучение: короткий тур по студии ----------
+// Подсвечиваем часть окна и коротко объясняем. Сам запускается при первом открытии студии, потом — из справки (⌨).
+const TOUR = [
+  ['.topbar .scoreboard', 'Табло', 'Счёт партии, партии в матче и кто подаёт (жёлтая точка). Слева — выбранный матч, справа — аналитика.'],
+  ['.video-pane', 'Видео матча', 'Перетащите файл в окно — он скопируется в программу (любой формат). Колесо мыши над видео — зум, двойной клик — сброс.'],
+  ['#transport', 'Управление видео', 'Перемотка ±5 и ±15 с (стрелки ← →, с Shift — 15 с), скорость. «⟲ Синхр.» — разметка вслед за видео: Пробел на касании, после шага видео едет дальше, петля повторяет момент.'],
+  ['#timeline', 'Таймлайн', 'Метки касаний: зелёные — очко нам, красные — им, жёлтые — тайм-ауты. Клик по метке — к этому моменту.'],
+  ['.court-pane', '3D-площадка', 'Розыгрыш вводится кликами. Сначала точка, куда пришёл мяч, потом игрок (вероятный пульсирует). Двойной клик по полу — очко в эту точку. Мышь — вращать, колесо — зум.'],
+  ['#courtHint', 'Что делать сейчас', 'Подсказка шага и счётчик касаний 1 · 2 · 3: приём → доводка (оценка по зонам) → пас (колесо — высота) → атака.'],
+  ['#courtBar', 'Кнопки под рукой', '«Назад» (⌫) — на шаг назад, «Отмена» (Esc), «Мяч упал» (X), тайм-ауты, +1 без статистики.'],
+  ['.court-tools', 'Виды и настройки', 'Камера: перспектива, сверху, из-за спины, сбоку. Сетка зон, история касаний, расстановки команды и зоны доводки ++ / +− / +.'],
+  ['#dock', 'Нижняя панель', 'Расстановка Р1–Р6 и замены, кнопки действий — запасной вариант ввода без площадки (клавиши A–H, Q–Y).'],
+  ['#sideTabs', 'Панели справа', '«События» — розыгрыши (★ лучшие моменты, нарезка mp4) и правка; «Видео» — библиотека; «Стат.» — живая статистика; «Матч» — формат, турнир, пресет, команда и резервные копии.'],
+  [null, 'Начнём', 'Вкладка «Матч» → «Новый»: соперник и формат, затем старт партии из пресета (Р1–Р6). Все клавиши — кнопка ⌨ или «?». Тур можно пройти снова оттуда же.'],
+];
+function startTour(k = 0) {
+  modal('');
+  let el = $('tour');
+  if (!el) { el = document.createElement('div'); el.id = 'tour'; document.body.append(el); }
+  const [sel, title, text] = TOUR[k];
+  const target = sel && document.querySelector(sel);
+  const r = target?.getBoundingClientRect();
+  const hole = r && r.width ? `<div class="tour-hole" style="left:${r.left - 6}px;top:${r.top - 6}px;width:${r.width + 12}px;height:${r.height + 12}px"></div>` : '<div class="tour-dim"></div>';
+  // Карточку ставим рядом с подсвеченным: снизу, если есть место, иначе сверху; по центру — для финального шага.
+  let pos = 'left:50%;top:50%;transform:translate(-50%,-50%)';
+  if (r && r.width) {
+    const left = Math.max(16, Math.min(innerWidth - 376, r.left + r.width / 2 - 180));
+    if (r.bottom + 220 < innerHeight) pos = `left:${left}px;top:${r.bottom + 14}px`;
+    else if (r.top - 220 > 0) pos = `left:${left}px;top:${r.top - 14}px;transform:translateY(-100%)`;
+    else pos = `left:${Math.max(16, r.left + 16)}px;top:${r.top + 60}px`; // большой блок — карточка внутри него
+  }
+  el.innerHTML = `${hole}<div class="tour-card" style="${pos}">
+    <div class="tour-step">${k + 1} / ${TOUR.length}</div><b>${title}</b><p>${text}</p>
+    <div class="tour-btns"><button class="btn sm ghost" data-a="tourEnd">Пропустить</button><span class="grow"></span>
+      ${k ? '<button class="btn sm" data-a="tourGo" data-k="' + (k - 1) + '">Назад</button>' : ''}
+      ${k < TOUR.length - 1 ? `<button class="btn sm primary" data-a="tourGo" data-k="${k + 1}">Далее</button>` : '<button class="btn sm primary" data-a="tourEnd">Начать работу</button>'}</div></div>`;
+  ui.tour = k;
+}
+function endTour() { $('tour')?.remove(); ui.tour = null; store.set('tourDone', true); }
 
 // ---------- Видео ----------
 function openVideo(id, { keepTime = false } = {}) {
@@ -2083,6 +2124,9 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  tourGo: d => startTour(+d.k),
+  tourEnd: () => endTour(),
+  tourStart: () => startTour(0),
   dataModal: () => call(openDataModal),
   bkMake: () => call(async () => { const b = await api('POST', '/api/backups'); await openDataModal(); toast(`Копия сделана: матчей ${b.matches}`); }),
   bkDownload: () => call(async () => {
@@ -2411,6 +2455,13 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && e.target.id === 'newOpp') H.createNewOpp();
     return;
   }
+  if (ui.tour != null) {
+    if (e.key === 'Escape') endTour();
+    if (e.key === 'ArrowRight' || e.key === 'Enter') ui.tour < TOUR.length - 1 ? startTour(ui.tour + 1) : endTour();
+    if (e.key === 'ArrowLeft' && ui.tour > 0) startTour(ui.tour - 1);
+    e.preventDefault();
+    return;
+  }
   if (modalOpen()) {
     if (e.key === 'Escape') { modal(''); ui.fEdit = null; }
     if (e.key === 'Enter' && ui.lineupDraft?.order.length === 6 && $('modal').querySelector('[data-a=lstart]')) H.lstart();
@@ -2522,6 +2573,7 @@ call(async () => {
   await loadAll();
   const id = location.hash.match(/m=([a-z0-9]+)/)?.[1] ?? store.get('lastMatch', null) ?? ui.matches[0]?.id;
   pollVideos();
+  if (!store.get('tourDone', false)) setTimeout(() => startTour(0), 900);
   if (id && ui.matches.some(m => m.id === id)) {
     await openMatch(id);
     // Ссылка на конкретный розыгрыш (из отчёта игрока): #m=…&r=партия:розыгрыш.
