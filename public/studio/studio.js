@@ -3,7 +3,7 @@
 // здесь — только интерфейс: видео, 3D-площадка, ввод касаний, правка и вставка событий.
 import { replay, playerName, LABELS, ACTIONS, SKILLS, totals, attEff, recRating, newPlayer, addStats, setTitle, setTarget, formatOptions, formatKey, pickFormat, formatName, formatOf } from '../engine.js';
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
-import { createCourt3D } from './court3d.js';
+import { createCourt3D, KIT_DEFAULT } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
 import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide, overlapIssues, attackByRole, frontByRole } from '../formations.js';
 
@@ -751,7 +751,7 @@ function paintPlayers() {
   const hitFrom = c?.stage === 'their' ? c.origin ?? (c.block ?? ui.blockHover ? { x: (c.block ?? ui.blockHover).x, y: NET + 0.9 } : null) : null;
   court.setPlayers(st.set.lineup.map(id => {
     const p = person(id);
-    return { id, ...(id === setterNow ? { yaw: Math.PI / 2 } : hitFrom ? { face: hitFrom } : {}), act: ui.acts[id], label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
+    return { id, ...(id === setterNow ? { yaw: Math.PI / 2 } : hitFrom ? { face: hitFrom } : {}), act: ui.acts[id], label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleOf(p) === 'l', spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
   }));
 }
 
@@ -1116,7 +1116,7 @@ function sideMatch() {
     <div class="card teamcard" style="margin-bottom:8px">${icon('i-list')}<span class="grow"><b>Данные и резервные копии</b><small>копия каждый день · корзина удалённых матчей</small></span>
       <button class="btn sm" data-a="dataModal">Открыть</button></div>
     <div class="card teamcard">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>в составе ${ui.roster.filter(p => p.active !== false).length} · в запасе ${ui.roster.filter(p => p.active === false).length} · соперников ${ui.settings.opponents.length}</small></span>
-      <button class="btn sm" data-a="teamModal">Игроки, соперники, эмблемы</button></div>`;
+      <button class="btn sm" data-a="teamModal">Игроки, форма, соперники</button></div>`;
 }
 
 // ---------- Таймлайн ----------
@@ -1556,8 +1556,21 @@ function fileToEmblem(file) {
     img.src = url;
   });
 }
+// Форма команды: цвета майки, шортов, цифр; отдельная майка у связующего и у либеро. Справа — как это выглядит.
+const KIT_FIELDS = [['main', 'Майка'], ['shorts', 'Шорты'], ['number', 'Цифры номера'], ['setter', 'Майка связующего'], ['libero', 'Майка либеро']];
+function kitPreview(k) {
+  const fig = (shirt, label) => `<div class="kitfig"><svg viewBox="0 0 60 70"><path d="M18 6h24l14 10-7 11-6-4v41H17V23l-6 4-7-11z" fill="${shirt}" stroke="rgb(0 0 0 / .35)"/>
+    <text x="30" y="46" text-anchor="middle" font-size="22" font-weight="800" fill="${k.number}">7</text></svg><div class="kshorts" style="background:${k.shorts}"></div><small>${label}</small></div>`;
+  return fig(k.main, 'игроки') + fig(k.setter, 'связующий') + fig(k.libero, 'либеро');
+}
+function kitHtml(k) {
+  return `<p class="muted" style="margin:0 0 10px">Цвета формы на 3D-площадке. Связующий — тот, кто пасует в этой расстановке; либеро — игрок с ролью «Либеро».</p>
+    <div class="kitwrap"><div class="kitlist">${KIT_FIELDS.map(([key, name]) => `<label class="kitrow"><input type="color" data-k="kitColor" data-key="${key}" value="${k[key]}"><span>${name}</span></label>`).join('')}
+      <button class="btn sm ghost" data-a="kitReset" style="margin-top:6px;justify-self:start">Как было по умолчанию</button></div>
+    <div class="kitprev">${kitPreview(k)}</div></div>`;
+}
 function openTeamModal() {
-  ui.team = { teamName: ui.settings.teamName, emblem: ui.settings.emblem ?? null, opponents: JSON.parse(JSON.stringify(ui.settings.opponents)), roster: JSON.parse(JSON.stringify(ui.roster)), tab: 'players' };
+  ui.team = { teamName: ui.settings.teamName, emblem: ui.settings.emblem ?? null, kit: { ...KIT_DEFAULT, ...ui.settings.kit }, opponents: JSON.parse(JSON.stringify(ui.settings.opponents)), roster: JSON.parse(JSON.stringify(ui.roster)), tab: 'players' };
   paintTeamModal();
 }
 function paintTeamModal() {
@@ -1577,9 +1590,10 @@ function paintTeamModal() {
   modal(`<h2>Команда</h2>
     <div class="trow us">${pick('us')}<input data-k="teamName" value="${esc(t.teamName)}" placeholder="Название команды">
       ${t.emblem ? '<button class="btn sm ghost" data-a="embDel" data-who="us">Убрать эмблему</button>' : ''}</div>
-    <div class="seg" style="margin:14px 0 10px"><button class="${t.tab === 'players' ? 'on' : ''}" data-a="teamTab" data-v="players">Игроки</button><button class="${t.tab === 'opps' ? 'on' : ''}" data-a="teamTab" data-v="opps">Соперники и эмблемы</button></div>
+    <div class="seg" style="margin:14px 0 10px"><button class="${t.tab === 'players' ? 'on' : ''}" data-a="teamTab" data-v="players">Игроки</button><button class="${t.tab === 'kit' ? 'on' : ''}" data-a="teamTab" data-v="kit">Форма</button><button class="${t.tab === 'opps' ? 'on' : ''}" data-a="teamTab" data-v="opps">Соперники и эмблемы</button></div>
+    ${t.tab === 'kit' ? kitHtml(t.kit) + `<div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div>` : ''}
     ${t.tab === 'players' ? playersHtml + `<div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div>` : ''}
-    <div ${t.tab === 'players' ? 'hidden' : ''}>
+    <div ${t.tab !== 'opps' ? 'hidden' : ''}>
     <p class="muted" style="margin:0 0 8px">Эмблемы показываются в табло, списках матчей и аналитике. Кликните по кружку, чтобы загрузить картинку.</p>
     <div class="tlist">${t.opponents.map((o, i) => `<div class="trow">${pick(i)}<input data-k="oppName" data-i="${i}" value="${esc(o.name)}" placeholder="Название">
       ${o.emblem ? `<button class="btn sm ghost" data-a="embDel" data-who="${i}">Убрать</button>` : ''}
@@ -1874,7 +1888,7 @@ function replayPlayers(r, t) {
     const z = zones[k], p = person(id);
     let spot = kind === 'att' ? (F.touched?.att?.[rot] ? spotFor(F, 'att', rot, z) : attRole[id]) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st0.rally.server === id && !last) spot = { x: 7.6, y: -0.9 };
-    return { id, ...(last?.skill === 'set' && last.p === id ? { yaw: Math.PI / 2 } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
+    return { id, ...(last?.skill === 'set' && last.p === id ? { yaw: Math.PI / 2 } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleOf(p) === 'l', spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
   });
 }
 let replayKey = null;
@@ -2102,6 +2116,7 @@ function updateEvent(i, patch) {
 // ---------- Действия ----------
 async function loadAll() {
   [ui.roster, ui.settings, ui.matches, ui.videos] = await Promise.all([api('GET', '/api/roster'), api('GET', '/api/settings'), api('GET', '/api/matches'), api('GET', '/api/videos')]);
+  court.setKit(ui.settings.kit);
   ui.zones = zonesOf(ui.settings);
 }
 async function openMatch(id) {
@@ -2214,6 +2229,7 @@ const H = {
   oppAdd: () => { ui.team.opponents.push({ id: newId(), name: '' }); paintTeamModal(); },
   oppDel: d => { const o = ui.team.opponents[+d.i]; if (o.name && !confirm(`Удалить соперника «${o.name}»? Его матчи останутся.`)) return; ui.team.opponents.splice(+d.i, 1); paintTeamModal(); },
   teamTab: d => { ui.team.tab = d.v; paintTeamModal(); },
+  kitReset: () => { ui.team.kit = { ...KIT_DEFAULT }; paintTeamModal(); },
   plAdd: () => { ui.team.roster.push({ id: newId(), num: '', name: '', role: '', setter: false }); paintTeamModal(); setTimeout(() => document.querySelector('.trow.pl:last-of-type input[data-k=plName]')?.focus(), 30); },
   plActive: d => { const p = ui.team.roster[+d.i]; p.active = p.active === false ? true : false; paintTeamModal(); },
   plDel: d => { const p = ui.team.roster[+d.i]; if (p.name && !confirm(`Удалить игрока «${p.name}» из команды? В прошлых матчах он останется. Если он просто не играет сейчас — лучше «В запасе».`)) return; ui.team.roster.splice(+d.i, 1); paintTeamModal(); },
@@ -2222,7 +2238,8 @@ const H = {
     const opponents = t.opponents.filter(o => o.name.trim()).map(o => ({ ...o, name: o.name.trim() }));
     const roster = t.roster.filter(p => String(p.num).trim() || p.name.trim()).map(p => ({ ...p, num: p.num === '' ? '' : Number(p.num), name: p.name.trim(), role: roleOf(p), setter: roleOf(p) === 's' }));
     ui.roster = await api('PUT', '/api/roster', roster);
-    ui.settings = await api('PUT', '/api/settings', { teamName: t.teamName.trim() || 'Мы', emblem: t.emblem, opponents });
+    ui.settings = await api('PUT', '/api/settings', { teamName: t.teamName.trim() || 'Мы', emblem: t.emblem, opponents, kit: t.kit });
+    court.setKit(ui.settings.kit);
     ui.team = null; modal('');
     ui.matches = await api('GET', '/api/matches');
     if (ui.match) setMatch(await api('GET', `/api/matches/${ui.match.id}`));
@@ -2488,6 +2505,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => {
   if (ui.team && e.target.dataset.k === 'teamName') ui.team.teamName = e.target.value;
+  if (ui.team && e.target.dataset.k === 'kitColor') { ui.team.kit[e.target.dataset.key] = e.target.value; document.querySelector('.kitprev').innerHTML = kitPreview(ui.team.kit); }
   if (ui.team && e.target.dataset.k === 'oppName') ui.team.opponents[+e.target.dataset.i].name = e.target.value;
   if (ui.team && e.target.dataset.k === 'plName') ui.team.roster[+e.target.dataset.i].name = e.target.value;
   if (ui.team && e.target.dataset.k === 'plNum') ui.team.roster[+e.target.dataset.i].num = e.target.value;

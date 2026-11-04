@@ -37,15 +37,18 @@ function labelTexture(text, { bg = '#e9eaec', fg = '#111', ring = null } = {}) {
 }
 
 // Номер на майке: крупные цифры с обводкой, фон прозрачный.
-function numberTexture(num) {
+// Цвета формы по умолчанию: майка, шорты, цифры, майка связующего, майка либеро.
+export const KIT_DEFAULT = { main: '#e9eaec', shorts: '#1b2a4a', number: '#16233f', setter: '#f0c85a', libero: '#e8613c' };
+const lum = hex => { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; };
+function numberTexture(num, color = KIT_DEFAULT.number) {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d');
   g.font = `800 ${String(num).length > 1 ? 84 : 100}px Inter, system-ui, sans-serif`;
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.lineJoin = 'round'; g.lineWidth = 10; g.strokeStyle = 'rgba(255,255,255,.9)';
+  g.lineJoin = 'round'; g.lineWidth = 10; g.strokeStyle = lum(color) < 0.45 ? 'rgba(255,255,255,.9)' : 'rgba(10,12,18,.85)'; // обводка — контрастная цифрам
   g.strokeText(String(num), 64, 70);
-  g.fillStyle = '#16233f';
+  g.fillStyle = color;
   g.fillText(String(num), 64, 70);
   return canvasTex(c);
 }
@@ -327,6 +330,12 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     blob: new THREE.MeshBasicMaterial({ map: blobTexture(), transparent: true, depthWrite: false }),
   };
   for (const m of Object.values(MAT)) m.userData.shared = true;
+  let kit = { ...KIT_DEFAULT };
+  // Форма команды из настроек. Цифры «запечены» в текстуру — при смене их цвета фигуры пересоздаются сами (ключ фигуры).
+  function setKit(k = {}) {
+    kit = { ...KIT_DEFAULT, ...Object.fromEntries(Object.entries(k).filter(([, v]) => v)) };
+    MAT.shorts.color.set(kit.shorts);
+  }
   const shadowed = o => { o.castShadow = true; return o; };
   const mesh = (geo, mat, parent, x = 0, y = 0, z = 0) => { const m = shadowed(new THREE.Mesh(geo, mat)); m.position.set(x, y, z); parent.add(m); return m; };
   const joint = (parent, x = 0, y = 0, z = 0) => { const j = new THREE.Group(); j.position.set(x, y, z); parent.add(j); return j; };
@@ -381,7 +390,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     mesh(G.head, MAT.skin, head);
     const hair = mesh(G.hair, MAT.hair, head, 0, 0.012, 0.008); hair.rotation.x = -0.25;
     // Номер на спине (к камере) и маленький — на груди.
-    const numTex = p.num != null && p.num !== '' ? numberTexture(p.num) : null;
+    const numTex = p.num != null && p.num !== '' ? numberTexture(p.num, kit.number) : null;
     if (numTex) {
       const nm = new THREE.MeshStandardMaterial({ map: numTex, transparent: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 });
       const back = new THREE.Mesh(G.back, nm); back.position.y = 0.33; torso.add(back);
@@ -417,7 +426,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     scene.add(g);
     return g;
   }
-  const tokenKey = p => String(p.num ?? '');
+  const tokenKey = p => `${p.num ?? ''}|${kit.number}`;
   // Удаление фигуры: свои материалы и текстуры освобождаем, общие геометрии и материалы — нет.
   const shared = new Set(Object.values(G));
   function disposeToken(g) {
@@ -551,7 +560,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       rec.pinned = !!p.pinned; // игрок у мяча: его не толкают, он толкает других
       rec.hl = !!p.hl;
       const u = rec.group.userData;
-      u.jersey.color.set(p.setter ? 0xf0c85a : 0xe9eaec);
+      u.jersey.color.set(p.libero ? kit.libero : p.setter ? kit.setter : kit.main);
       u.jersey.emissive.set(p.hl ? 0x5a4512 : 0x000000);
       // Движение: новое действие запускается, когда меняется его ключ.
       if (p.act && p.act.key !== u.actKey) { u.actKey = p.act.key; u.act = { type: p.act.type, t0: clock() }; }
@@ -877,7 +886,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   }
 
   return {
-    setPlayers, setLabelMode, setPending, setDots, setTrails, setView, resize, setHands, setPreview, project, setBall,
+    setPlayers, setLabelMode, setKit, setPending, setDots, setTrails, setView, resize, setHands, setPreview, project, setBall,
     setWheelCapture: on => { wheelCapture = on; controls.enableZoom = !on; },
     toggleZones: on => { zoneGrid.visible = on ?? !zoneGrid.visible; return zoneGrid.visible; },
     dispose: () => { renderer.setAnimationLoop(null); renderer.dispose(); },
