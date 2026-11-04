@@ -539,3 +539,8 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
   .transport .ibtn { width: 30px; height: 30px; }
   .toggle span.long { display: none; }
 }
+
+.fcopy { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 12px; font-size: 12.5px; color: var(--smoke); }
+.fcopy .grow { flex: 1; }
+.fcopy select { font-size: 12.5px; padding: 5px 7px; }
+.modal:has(#fsvg) { width: min(800px, calc(100vw - 32px)); }

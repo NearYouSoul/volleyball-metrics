@@ -110,3 +110,28 @@ export function attackByRole(players, setterId) {
   if (setterId) out[setterId] = SETTER_SPOT;
   return out;
 }
+
+// ---------- Передняя линия по ролям ----------
+// В передней линии игроки играют по амплуа: доигровщик — слева (4), центральный — в центре (3),
+// связующий или диагональный — справа (2). Подписи «зона N» остаются протокольными — меняются только места.
+const FRONT_ROLE_SPOT = {
+  rec: { L: { x: 1.5, y: 5.0 }, M: { x: 4.1, y: 8.2 }, R: { x: 7.4, y: 7.0 }, S: { x: 6.4, y: 8.4 } },
+  serve: { L: { x: 1.6, y: 7.6 }, M: { x: 4.5, y: 7.9 }, R: { x: 7.4, y: 7.6 }, S: { x: 6.6, y: 8.2 } },
+  def: { L: { x: 1.8, y: 7.7 }, M: { x: 4.5, y: 8.5 }, R: { x: 7.2, y: 7.4 }, S: { x: 7.2, y: 7.4 } },
+  att: { L: { x: 0.7, y: 5.6 }, M: { x: 4.0, y: 6.5 }, R: { x: 8.3, y: 5.6 }, S: SETTER_SPOT },
+};
+const ROLE_SIDE = { oh: 'L', mb: 'M', s: 'R', opp: 'R' };
+// front: [{ zone, role }] — трое передней линии. Возвращает { зона → точка }.
+export function frontByRole(kind, front) {
+  const spots = FRONT_ROLE_SPOT[kind] ?? FRONT_ROLE_SPOT.serve, out = {}, free = new Set(['L', 'M', 'R']), left = [];
+  // Связующий и диагональный оба хотят «справа» — связующий в приоритете.
+  const order = [...front].sort((a, b) => (a.role === 's' ? -1 : b.role === 's' ? 1 : 0));
+  for (const p of order) {
+    const want = ROLE_SIDE[p.role];
+    if (want && free.has(want)) { free.delete(want); out[p.zone] = want === 'R' && p.role === 's' ? spots.S : spots[want]; } else left.push(p);
+  }
+  const zx = { 4: 0, 3: 1, 2: 2 };
+  const rest = ['L', 'M', 'R'].filter(k => free.has(k));
+  left.sort((a, b) => zx[a.zone] - zx[b.zone]).forEach((p, i) => { out[p.zone] = spots[rest[i]]; });
+  return out;
+}

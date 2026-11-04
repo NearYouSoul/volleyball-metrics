@@ -5,7 +5,7 @@ import { replay, playerName, LABELS, ACTIONS, SKILLS, totals, attEff, recRating,
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
-import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide, overlapIssues, attackByRole } from '../formations.js';
+import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide, overlapIssues, attackByRole, frontByRole } from '../formations.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -284,6 +284,8 @@ function presets() {
   return [{ id: 'main', name: 'Основной', system: ui.settings.system || '5-1', formations: ui.settings.formations ?? {} }];
 }
 const presetById = id => presets().find(p => p.id === id);
+// Роль игрока с учётом матча: в этом матче ЦБ может играть доигровщика (match.roles), иначе — роль в команде.
+const roleIn = id => ui.match?.roles?.[id] ?? roleOf(person(id)?.id ? person(id) : ui.roster.find(p => p.id === id));
 const curPreset = () => presetById(ui.match?.preset) ?? presetById(ui.settings.activePreset) ?? presets()[0];
 const FORM = () => curPreset().formations ?? {};
 
@@ -1370,11 +1372,22 @@ function rosterPanel(f) {
 function bindPreset() { const w = editPreset(); Object.assign(ui.fEdit, { data: w.data, touched: w.touched, inherited: w.inherited }); }
 const isTouched = (f, k, r) => !!f.touched[k]?.[r];
 // Переход в расстановку: если её ещё не настраивали — все сдвигаются на переход из предыдущей и встают на её места.
+// Передняя линия расстановки r по ролям игроков состава пресета.
+function applyFrontRoles(k, r) {
+  const f = ui.fEdit, { start, ms } = refSlots();
+  if (!start) return false;
+  const front = [0, 1, 2, 3, 4, 5].map(sl => ({ zone: slotZone(sl, r, ms), role: roleIn(start[sl]) })).filter(p => p.zone >= 2 && p.zone <= 4);
+  if (!front.some(p => p.role)) return false;
+  Object.assign(f.data[k][r], JSON.parse(JSON.stringify(frontByRole(k, front))));
+  return true;
+}
 function goRot(r) {
   const f = ui.fEdit, from = f.rot, k = f.kind;
   const pr = prevRot(r);
   if (!isTouched(f, k, r) && (isTouched(f, k, pr) || f.inherited[k]?.[pr])) {
     f.data[k][r] = JSON.parse(JSON.stringify(f.data[k][pr]));
+    // Сдвиг на переход + передняя линия сразу по ролям (ДО — 4, ЦБ — центр, СВ/ДИ — 2): меньше ручной правки.
+    applyFrontRoles(k, r);
     (f.inherited[k] ??= {})[r] = true;
   }
   f.rot = r;
@@ -1444,6 +1457,14 @@ function paintFormEditor(fromRot = null) {
       <text x="4.5" y="-0.45" class="fcap">сетка</text><text x="4.5" y="10.9" class="fcap">зона подачи</text>
       ${ghosts}${tokens}
     </svg></div>
+    <div class="fcopy">
+      <button class="btn sm" data-a="fFront" title="Передняя линия по амплуа: ДО — слева (4), ЦБ — в центре, СВ/ДИ — справа (2). Подписи зон — протокольные">Передняя по ролям</button>
+      <button class="btn sm ghost" data-a="fFrontAll" title="То же во всех Р1–Р6 этой ситуации">…во всех Р</button>
+      <span class="grow"></span>
+      Скопировать из <select data-k="fSrcKind">${Object.entries(SITUATIONS).map(([k, v]) => `<option value="${k}" ${(f.srcKind ?? f.kind) === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <select data-k="fSrcRot">${GAME_ORDER.map(r => `<option value="${r}" ${(f.srcRot ?? f.rot) === r ? 'selected' : ''}>Р${r}</option>`).join('')}</select>
+      <button class="btn sm" data-a="fCopyFrom">Копировать</button>
+    </div>
     <div class="foot"><button class="btn ghost" data-a="fProto" title="Все — ровно в свои зоны по протоколу; от этого удобно расставлять">Протокольная</button><button class="btn ghost" data-a="fReset">Сбросить Р${f.rot}</button><button class="btn ghost" data-a="fCopy">Копировать во все Р1–Р6</button><span class="grow"></span>
       <button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="fSave">Сохранить</button></div>`);
   const svg = $('fsvg');
@@ -2036,6 +2057,25 @@ const H = {
   fKind: d => { ui.fEdit.kind = d.v; ui.fEdit.defView = 'base'; goRot(ui.fEdit.rot); },
   fDefView: d => { ui.fEdit.defView = d.v; paintFormEditor(); },
   fRot: d => goRot(+d.v),
+  fFront: () => {
+    const f = ui.fEdit;
+    if (!applyFrontRoles(f.kind, f.rot)) return toast('Нужен состав пресета с ролями игроков («Состав пресета» и роли в настройках)', true);
+    (f.touched[f.kind] ??= {})[f.rot] = true; paintFormEditor();
+  },
+  fFrontAll: () => {
+    const f = ui.fEdit;
+    let ok = false;
+    for (const r of GAME_ORDER) if (applyFrontRoles(f.kind, r)) { ok = true; (f.touched[f.kind] ??= {})[r] = true; }
+    if (!ok) return toast('Нужен состав пресета с ролями игроков', true);
+    toast(`Передняя линия по ролям — во всех расстановках («${SITUATIONS[f.kind]}»)`); paintFormEditor();
+  },
+  fCopyFrom: () => {
+    const f = ui.fEdit, sk = f.srcKind ?? f.kind, sr = f.srcRot ?? f.rot;
+    if (sk === f.kind && sr === f.rot) return toast('Выберите другую ситуацию или расстановку');
+    f.data[f.kind][f.rot] = JSON.parse(JSON.stringify(f.data[sk][sr]));
+    (f.touched[f.kind] ??= {})[f.rot] = true;
+    toast(`Скопировано из «${SITUATIONS[sk]}» Р${sr} — поправьте, что отличается`); paintFormEditor();
+  },
   fProto: () => {
     const f = ui.fEdit;
     f.data[f.kind][f.rot] = Object.fromEntries([1, 2, 3, 4, 5, 6].map(z => [z, { ...ZONE_SPOT[z] }]));
@@ -2211,6 +2251,8 @@ document.addEventListener('change', e => {
   if (k === 'fPreset') { ui.fEdit.presetId = v; bindPreset(); paintFormEditor(); }
   if (k === 'fSystem') { editPreset().system = v; }
   if (k === 'fRules') { editPreset().rules = v; paintFormEditor(); }
+  if (k === 'fSrcKind') ui.fEdit.srcKind = v;
+  if (k === 'fSrcRot') ui.fEdit.srcRot = +v;
   if (k === 'fSlot') {
     // Игрок уже стоит в другой зоне — меняем их местами.
     const lu = ensurePresetLineup(), sl = +e.target.dataset.slot, other = lu.start.indexOf(v);
