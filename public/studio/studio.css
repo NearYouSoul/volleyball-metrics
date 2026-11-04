@@ -512,3 +512,20 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .embpick { cursor: pointer; border-radius: 50%; transition: box-shadow .12s; }
 .embpick:hover { box-shadow: 0 0 0 2px var(--sky); }
 .tlist { max-height: 46vh; overflow-y: auto; }
+
+/* Живая статистика */
+.statseg { display: flex; flex-wrap: wrap; margin-bottom: 10px; }
+.statseg button { flex: 1 0 auto; font-size: 12px; }
+.sks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.sk { background: var(--panel-2); border-radius: 9px; box-shadow: var(--key); padding: 8px 10px; display: grid; gap: 2px; }
+.sk span { font-size: 11px; color: var(--smoke); } .sk b { font-size: 19px; font-weight: 500; font-variant-numeric: tabular-nums; } .sk small { font-size: 10.5px; color: var(--smoke); }
+.stbl { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.stbl th { font-size: 10.5px; font-weight: 500; color: var(--smoke); padding: 4px 3px; text-align: center; }
+.stbl td { padding: 5px 3px; text-align: center; border-top: 1px solid rgb(255 255 255 / .04); }
+.stbl .l { text-align: left; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stbl .pos { color: var(--mint); } .stbl .neg { color: var(--coral); }
+.srs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.sr { background: var(--panel-2); border-radius: 8px; padding: 6px 4px; text-align: center; display: grid; gap: 1px; box-shadow: var(--key); }
+.sr b { font-size: 11px; color: var(--ash); } .sr span { font-size: 14px; font-weight: 600; } .sr small { font-size: 10px; color: var(--smoke); }
+.sr.weak { box-shadow: 0 0 0 1px rgb(255 99 99 / .5); }
+.side-tabs button { gap: 5px; font-size: 12.5px; }

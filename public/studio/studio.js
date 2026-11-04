@@ -1,7 +1,7 @@
 // Студия — десктопная программа для разбора матча по видео и детальной статистики.
 // Состояние матча, как и везде, вычисляет engine.js из списка событий на сервере;
 // здесь — только интерфейс: видео, 3D-площадка, ввод касаний, правка и вставка событий.
-import { replay, playerName, LABELS, ACTIONS, SKILLS, setTitle, setTarget, formatOptions, formatKey, pickFormat, formatName, formatOf } from '../engine.js';
+import { replay, playerName, LABELS, ACTIONS, SKILLS, totals, attEff, recRating, newPlayer, addStats, setTitle, setTarget, formatOptions, formatKey, pickFormat, formatName, formatOf } from '../engine.js';
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
@@ -886,7 +886,7 @@ function paintDock() {
 // ---------- Боковая панель ----------
 function paintSide() {
   document.querySelectorAll('#sideTabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
-  $('side').innerHTML = { events: sideEvents, video: sideVideo, match: sideMatch }[ui.tab]();
+  $('side').innerHTML = { events: sideEvents, video: sideVideo, match: sideMatch, stat: sideStat }[ui.tab]();
 }
 
 function eventRows() {
@@ -965,6 +965,43 @@ function editor({ i, ev }) {
       <button class="btn sm danger" data-a="evDel" data-i="${i}">${icon('i-x')}Удалить</button>
     </div>
   </div>`;
+}
+
+// ---------- Живая статистика матча (правая панель) ----------
+// Обновляется с каждым касанием: счёт по партиям, сайд-аут / брейк, серия, игроки, расстановки.
+function sideStat() {
+  if (!ui.match) return '<p class="muted">Матч не открыт.</p>';
+  const st = ui.full, scope = ui.statScope ?? 'all';
+  const t = st.teams[scope] ?? {}, pl = st.players[scope] ?? {};
+  const pc = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '–');
+  const sets = st.sets.map(s => `<button class="${scope === s.n ? 'on' : ''}" data-a="statScope" data-v="${s.n}">П${s.n + 1} ${s.us}:${s.them}</button>`).join('');
+  // Текущая серия очков в партии.
+  const flow = st.set?.flow ?? [];
+  let run = 0; for (let i = flow.length - 1; i >= 0 && flow[i] === flow.at(-1); i--) run++;
+  const so = t.sideout ?? { n: 0, won: 0 }, brk = t.brk ?? { n: 0, won: 0 };
+  const sum = Object.values(pl).reduce((a, p) => addStats(a, p), newPlayer());
+  const ours = totals(sum);
+  const kpi = (title, v, s2) => `<div class="sk"><span>${title}</span><b>${v}</b><small>${s2}</small></div>`;
+  const rows = Object.entries(pl).map(([id, p]) => ({ id, p, tt: totals(p) })).sort((a, b) => b.tt.points - a.tt.points || b.tt.diff - a.tt.diff);
+  const rots = [1, 6, 5, 4, 3, 2].map(r => { const x = t.rot?.[r]; return `<div class="sr ${x && x.so.n >= 2 && x.so.won / x.so.n < 0.45 ? 'weak' : ''}"><b>Р${r}</b><span>${x ? pc(x.so.won, x.so.n) : '–'}</span><small>${x ? `${x.us}:${x.them}` : ''}</small></div>`; }).join('');
+  return `<div class="seg statseg"><button class="${scope === 'all' ? 'on' : ''}" data-a="statScope" data-v="all">Матч ${st.setsWon.us}:${st.setsWon.them}</button>${sets}</div>
+    <div class="sks">
+      ${kpi('Сайд-аут', pc(so.won, so.n), `${so.won} из ${so.n}`)}
+      ${kpi('Брейк', pc(brk.won, brk.n), `${brk.won} из ${brk.n}`)}
+      ${kpi('Атака', pc(sum.att.kill + sum.att.bo, sum.att.tot), `эфф ${sum.att.tot ? Math.round(attEff(sum.att) * 100) + '%' : '–'}`)}
+      ${kpi('Приём', sum.rec.tot ? recRating(sum.rec).toFixed(2) : '–', `из 3 · ош ${sum.rec.err}`)}
+      ${kpi('Наши очки', ours.points, `ошибок ${ours.errors}`)}
+      ${kpi('Подарки', t.oppError ?? 0, `соперник забил ${t.oppKill ?? 0}`)}
+    </div>
+    ${run >= 3 && st.set && !st.set.over ? `<div class="banner ${flow.at(-1) === 'us' ? 'ok' : 'bad'}" style="margin-top:8px">Серия ${run}:0 ${flow.at(-1) === 'us' ? 'наша' : 'соперника'}${flow.at(-1) === 'them' ? ' — может, тайм-аут?' : ''}</div>` : ''}
+    <h3>Игроки</h3>
+    <table class="stbl"><tr><th class="l">Игрок</th><th title="Очки">Оч</th><th title="Плюс / минус">±</th><th title="Атака: очки / всего">Атака</th><th title="Приём: средняя оценка 0–3">Пр</th><th title="Подача: эйсы / ошибки">Под</th><th title="Блок: очки">Бл</th></tr>
+      ${rows.map(({ id, p, tt }) => `<tr><td class="l">${esc(name(id))}</td><td><b>${tt.points}</b></td><td class="${tt.diff > 0 ? 'pos' : tt.diff < 0 ? 'neg' : ''}">${tt.diff > 0 ? '+' : ''}${tt.diff}</td>
+        <td>${p.att.tot ? `${p.att.kill + p.att.bo}/${p.att.tot}` : '·'}</td><td>${p.rec.tot ? recRating(p.rec).toFixed(1) : '·'}</td><td>${p.serve.ace || p.serve.err ? `${p.serve.ace}/${p.serve.err}` : '·'}</td><td>${p.blk.point || '·'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Касаний пока нет</td></tr>'}
+    </table>
+    <h3>Сайд-аут по расстановкам</h3>
+    <div class="srs">${rots}</div>
+    <p class="muted" style="margin-top:10px">Подробно — в <a href="stats.html#m=${ui.match.id}" target="_blank" style="color:var(--sky)">аналитике</a>.</p>`;
 }
 
 function sideVideo() {
@@ -1950,6 +1987,7 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  statScope: d => { ui.statScope = d.v === 'all' ? 'all' : +d.v; paintSide(); },
   teamModal: () => openTeamModal(),
   embDel: d => { if (d.who === 'us') ui.team.emblem = null; else delete ui.team.opponents[+d.who].emblem; paintTeamModal(); },
   oppAdd: () => { ui.team.opponents.push({ id: newId(), name: '' }); paintTeamModal(); },
