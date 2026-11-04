@@ -372,8 +372,8 @@ export function anchorOf(rig, part, out = new THREE.Vector3()) {
     rig.armL.wrist.getWorldPosition(_a); rig.armR.wrist.getWorldPosition(_b);
     out.copy(_a).add(_b).multiplyScalar(0.5);
     rig.armL.el.getWorldPosition(_a); rig.armR.el.getWorldPosition(_b);
-    out.lerp(_a.add(_b).multiplyScalar(0.5), 0.25);
-    return out.setY(out.y + 0.11);
+    out.lerp(_a.add(_b).multiplyScalar(0.5), 0.12);
+    return out.addScaledVector(_f, 0.03).setY(out.y + 0.1);
   }
   if (part === 'hands' || part === 'block') {
     rig.armL.palm.getWorldPosition(_a); rig.armR.palm.getWorldPosition(_b);
