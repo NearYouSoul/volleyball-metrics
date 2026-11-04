@@ -25,7 +25,7 @@ const ui = {
   tab: 'events', filter: { skill: '', p: '' },
   activeVideo: null, sub: null, uploads: [], playlist: null, resumeAfter: false, busy: false,
   trackSets: store.get('trackSets', true), view: 'persp',
-  draft: null, moved: {}, movedKey: '', acts: {}, mouse: null, setH: null, menu: null, zones: null,
+  draft: null, moved: {}, movedKey: '', mouse: null, setH: null, menu: null, zones: null,
   sync: store.get('sync', false), syncRate: store.get('syncRate', 0.75), loopLen: store.get('loopLen', 5), anchor: null, loops: 0, ff: false, rate: 1, manualPause: false,
   evView: store.get('evView', 'rallies'), focusRally: null,
 };
@@ -262,6 +262,10 @@ const LABEL_ICON = { num: '№', name: 'Аб', full: '№А', none: '–' };
 function paintLabelBtn() { const b = $('labelBtn'); if (b) b.querySelector('b').textContent = LABEL_ICON[store.get('labelMode', 'num')] ?? '№'; }
 court.setLabelMode(store.get('labelMode', 'num'));
 paintLabelBtn();
+// Детализация игроков: реалистичные или простые (запоминается).
+function paintDetailBtn() { const b = $('detailBtn'); if (b) { const real = store.get('detail', 'real') === 'real'; b.classList.toggle('on', real); b.querySelector('b').textContent = real ? 'HD' : 'Lo'; } }
+court.setDetail(store.get('detail', 'real'));
+paintDetailBtn();
 
 const inCourtUs = p => p.x >= 0 && p.x <= 9 && p.y >= 0 && p.y < NET;
 const inCourtThem = p => p.x >= 0 && p.x <= 9 && p.y >= NET && p.y <= 18;
@@ -384,13 +388,12 @@ function scoutTag(ev) {
 }
 function postAct(ev) {
   scoutTag(ev);
-  if (ev.p && ACT_OF[ev.skill] && ev.skill !== 'rec' && ev.skill !== 'dig' && ev.skill !== 'set') doAct(ev.p, ACT_OF[ev.skill]);
   postEvent(stamp({ t: 'act', ...ev }));
 }
 function moveTo(id, p) { if (id && p) ui.moved[id] = { x: p.x, y: p.y }; }
-// Движение игрока на 3D: приём, пас, удар, блок, подача.
+// Движение игрока на 3D при повторе по видео: приём, пас, удар, блок, подача.
+// Во время ввода движения запускает сценарий мяча (ballScript) — точно к моменту касания.
 const ACT_OF = { rec: 'rec', dig: 'dig', set: 'set', att: 'att', blk: 'blk', serve: 'serve' };
-function doAct(id, type) { if (id && type) ui.acts[id] = { type, key: Math.random() }; }
 
 // Кто бьёт с этой точки: за трёхметровой — только задняя линия, у сетки — только передняя (кроме пасующего).
 function attackerFor(p, setter) {
@@ -410,7 +413,6 @@ function confirmPlayer(a, id) {
   ui.draft = a.prev;
   if (a.kind === 'touch') {
     ui.draft = { touch: { kind: a.touchKind, p: id, at: a.point, from: a.from ?? null, t: a.t ?? curT() } };
-    doAct(id, a.touchKind);
     moveTo(id, a.point);
     syncStep(a.t ?? curT());
   } else if (a.kind === 'setter') {
@@ -418,7 +420,6 @@ function confirmPlayer(a, id) {
     ui.draft = null;
     postAct({ skill: t.kind, res: a.res, p: t.p, to: t.at, ...(t.from && { from: t.from }), ...(t.t != null && { vt: t.t }) });
     ui.draft = { set: { p: id, from: a.point, q: 'good', t: a.t ?? curT() } };
-    setTimeout(() => { doAct(id, 'set'); paintPlayers(); }, 350); // связующий добегает и пасует
     syncStep(a.t ?? curT());
     moveTo(id, a.point);
     toast(`${name(t.p)} — ${LABELS[t.kind][a.res]}`);
@@ -690,6 +691,67 @@ function focusPlays() {
   return k >= 0 && baseStage(ctx()) === 'their' ? [] : rp.slice(k + 1);
 }
 
+// Мяч на 3D по шагам ввода. Полёт добавляется, когда шаг завершён (выбран игрок), — до этого мяч ждёт
+// у того, кто его последним коснулся: на предплечьях принимающего, в ладонях связующего, у руки нападающего.
+//   приём: мяч с подачи летит в «площадку» принимающему → доводка: от него к связующему →
+//   пас: связующий отдаёт, нападающий разбегается в три шага и бьёт в прыжке → атака: мяч летит в точку удара.
+const HOLD_SKILLS = new Set(['rec', 'dig', 'set', 'att']);
+function ballScript() {
+  if (!live() || ui.edit !== null || ui.focusRally || ui.editPoints) return null;
+  const c = ctx(), d = ui.draft || {};
+  const segs = [];
+  let holder = null, holderAt = null; // кто сейчас держит мяч и где
+  const key = p => (p ? `${(+p.x).toFixed(2)},${(+p.y).toFixed(2)}` : '');
+  const add = s => {
+    s.id = [s.kind, key(s.to), s.by ?? '', s.catcher ?? '', s.catchAs ?? ''].join('|');
+    segs.push(s);
+    holder = HOLD_SKILLS.has(s.catchAs) ? s.catcher : null;
+    holderAt = holder ? s.to : null;
+  };
+  const touch = (kind, p, to, from, res) => {
+    const rec = kind === 'rec';
+    add({ kind: rec ? 'serve' : 'spike', from: from ?? (rec ? DEFAULT_SPOT.serveThem : { x: 9 - to.x, y: 10.5 }), to, y0: rec ? 2.7 : 3.0, y1: 0.8, apex: rec ? 4.2 : 3.2, catcher: p, catchAs: kind });
+    if (res === 'over') add({ kind: 'free', from: to, to: { x: to.x, y: 13 }, y0: 0.8, y1: 0.12, apex: 4.6, by: p });
+    if (res === 'error') add({ kind: 'free', from: to, to: { x: to.x < 4.5 ? -1.2 : 10.2, y: Math.max(0.5, to.y - 2.5) }, y0: 0.8, y1: 0.12, apex: 2.8, by: p });
+  };
+  const pass = (to, p) => {
+    if (!holder || holder === p || !to) return;
+    add({ kind: 'pass', from: holderAt, to, y0: 0.8, y1: 2.45, apex: Math.max(3.4, 2.5 + Math.hypot(to.x - holderAt.x, to.y - holderAt.y) * 0.35), by: holder, catcher: p, catchAs: 'set' });
+  };
+  const plays = rallyPlays().filter(p => !p.virtual);
+  let lastSetTo = null;
+  plays.forEach((pl, i) => {
+    const next = plays[i + 1];
+    if (pl.skill === 'serve' && pl.to) add({ kind: 'serve', from: pl.from ?? DEFAULT_SPOT.serveUs, to: pl.to, y0: 2.7, y1: 0.12, apex: 4.4, by: pl.p, byAct: 'serve' });
+    if ((pl.skill === 'rec' || pl.skill === 'dig') && pl.to) touch(pl.skill, pl.p, pl.to, pl.from, pl.res);
+    if (pl.skill === 'set') {
+      const from = pl.from ?? SETTER_SPOT;
+      pass(from, pl.p);
+      const to = pl.to ?? spotOfTarget(pl);
+      if (to) {
+        // Кто бьёт: из записанной атаки, иначе — выбранный нападающий текущего шага.
+        const att = next ? (next.skill === 'att' ? next.p : null) : d.att?.p ?? (c?.stage === 'att' ? c.p : null);
+        add({ kind: 'set', from, to, y0: 2.5, y1: 3.0, apex: pl.h ?? TEMPOS[pl.tempo]?.h ?? 4.2, by: pl.p, catcher: att, catchAs: att ? 'att' : null });
+        lastSetTo = to;
+      }
+    }
+    if (pl.skill === 'att' && pl.to) {
+      const low = pl.res === 'bo' || (pl.res === 'play' && pl.to.y < NET + 0.5);
+      add({ kind: 'att', from: pl.from ?? lastSetTo ?? { x: 4.5, y: 7.5 }, to: pl.to, y0: 3.1, y1: low ? 2.8 : 0.12, apex: 3.25, by: pl.p });
+    }
+    if (pl.skill === 'blk' && pl.to) add({ kind: 'spike', from: pl.from ?? { x: pl.to.x, y: NET + 1 }, to: pl.to, y0: 3.1, y1: 2.75, apex: 3.2, catcher: pl.p, catchAs: 'blk', deflect: pl.res });
+    if (pl.skill === 'team' && pl.to && (pl.res === 'oppKill' || pl.res === 'oppAce')) {
+      const ace = pl.res === 'oppAce';
+      add({ kind: ace ? 'serve' : 'spike', from: pl.from ?? (ace ? DEFAULT_SPOT.serveThem : { x: 9 - pl.to.x, y: 10.5 }), to: pl.to, y0: ace ? 2.7 : 3.0, y1: 0.12, apex: ace ? 4.2 : 3.2 });
+    }
+  });
+  // Шаги, которые ещё не записаны в матч: выбран принимающий; выбран связующий.
+  if (d.touch?.at) touch(d.touch.kind, d.touch.p, d.touch.at, d.touch.from);
+  if (baseStage(c) === 'set') { const s = c.stage === 'await' ? c.set : c; pass(s.from, s.p); }
+  const r = ui.st.rally;
+  return { rally: rallyKey(), start: r.phase === 'serve' && r.weServe ? { hold: r.server } : null, segs };
+}
+
 // Линии за мышью: подача, доводка к связующему, дуга паса, удар; руки блока.
 function paintPreview() {
   const c = ctx(), m = ui.mouse;
@@ -751,7 +813,7 @@ function paintPlayers() {
   const hitFrom = c?.stage === 'their' ? c.origin ?? (c.block ?? ui.blockHover ? { x: (c.block ?? ui.blockHover).x, y: NET + 0.9 } : null) : null;
   court.setPlayers(st.set.lineup.map(id => {
     const p = person(id);
-    return { id, ...(id === setterNow ? { yaw: Math.PI / 2 } : hitFrom ? { face: hitFrom } : {}), act: ui.acts[id], label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleOf(p) === 'l', spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
+    return { id, ...(id === setterNow ? { yaw: Math.PI / 2 } : hitFrom ? { face: hitFrom } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleOf(p) === 'l', spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
   }));
 }
 
@@ -767,7 +829,10 @@ function paintCourt() {
   const edit = ui.editPoints && ui.edit !== null ? ui.match.events[ui.edit] : null;
   const a = c?.stage === 'await' ? c : null;
   court.setPending(edit ? { from: edit.from, to: edit.to } : a ? { to: a.point } : c?.stage === 'their' && c.origin ? { from: c.origin } : {});
-  court.setTrails(trailsFor(focusPlays()));
+  // Мяч во время ввода — по шагам (сценарий), при просмотре розыгрыша из истории — пролётом по дугам.
+  const script = ballScript();
+  court.setScript(script);
+  court.setTrails(trailsFor(focusPlays()), { animate: !script });
   const sk = DISPLAY_SKILL[group()];
   court.setDots(ui.history && sk && ui.full ? ui.full.plays.filter(p => p.skill === sk && p.to && !p.virtual).map(p => ({ ...p.to, color: colorOf(p), opacity: 0.45 })) : []);
   paintPreview();
@@ -2184,6 +2249,11 @@ const H = {
     const m = order[(order.indexOf(store.get('labelMode', 'num')) + 1) % order.length];
     store.set('labelMode', m); court.setLabelMode(m); paintLabelBtn();
     toast('Над игроками: ' + names[m]);
+  },
+  detail: () => {
+    const m = store.get('detail', 'real') === 'real' ? 'simple' : 'real';
+    store.set('detail', m); court.setDetail(m); paintDetailBtn();
+    toast(m === 'real' ? 'Игроки: реалистичные' : 'Игроки: простые (минималистичные)');
   },
   zones: (d, e) => { const on = court.toggleZones(); e.target.closest('button').classList.toggle('on', on); },
   // Кнопка пуска — «ручное» управление: на паузе видео само не поедет, пока не нажмёте снова.

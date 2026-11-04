@@ -5,6 +5,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { NET_H, zoneOf } from '../court.js';
+import { SPEED, GRAVITY, READY, ACTIONS, sampleAction, jumpAt, actTime, gait, arcAt, arcVelocity, flightTime } from './motion.js';
+import { buildFigure, applyPose, anchorOf, figureMaterials, sharedFigureGeometries } from './figure3d.js';
 
 // Часы анимации. Для проверок можно «заморозить» время: window.__vmTime = мс.
 const clock = (t = performance.now()) => window.__vmTime ?? t;
@@ -292,40 +294,16 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   }
 
   // ---------- Игроки ----------
-  const players = new Map(); // id → { group, target }
-  // Игрок — фигура с суставами (бедро/колено/стопа, плечо/локоть): майка с номером на спине и груди,
-  // шорты, наколенники, гетры, кроссовки. Смотрит на сетку (−Z), поэтому с нашей камеры виден номер на спине.
-  // Двигается кодом: стойка, бег, приём, пас, нападающий удар с разбега в прыжке, блок в прыжке, подача.
-  const THIGH = 0.44, SHIN = 0.48; // от тазобедренного до колена, от колена до подошвы
-  const LEG = THIGH + SHIN;
-  // Номер на майке — чуть изогнутая пластина по форме корпуса.
-  const numGeo = (w, rx, rz) => {
-    const g = new THREE.PlaneGeometry(w, w, 8, 1), pos = g.attributes.position;
-    for (let i = 0; i < pos.count; i++) pos.setZ(i, rz * Math.sqrt(Math.max(0, 1 - (pos.getX(i) / rx) ** 2)) + 0.006);
-    g.computeVertexNormals();
-    return g;
-  };
+  const players = new Map(); // id → { group, target, vel, yaw, … }
+  // Игрок — фигура с суставами (figure3d.js): «реалистичная» или «простая» (переключатель на панели).
+  // Смотрит на сетку (−Z), поэтому с нашей камеры виден номер на спине. Движения — ключевые позы (motion.js):
+  // стойка, бег и приставной шаг, приём, пас, нападающий удар с разбега в три шага, блок, подача.
+  const FM = figureMaterials();
   const G = {
-    thigh: new THREE.CapsuleGeometry(0.088, 0.3, 4, 12), shin: new THREE.CapsuleGeometry(0.066, 0.3, 4, 12),
-    pad: new THREE.CylinderGeometry(0.094, 0.094, 0.13, 16), sock: new THREE.CylinderGeometry(0.07, 0.064, 0.16, 14),
-    shoe: new THREE.CapsuleGeometry(0.058, 0.15, 4, 10), sole: new THREE.BoxGeometry(0.1, 0.018, 0.25),
-    delt: new THREE.SphereGeometry(0.074, 14, 10),
-    shorts: new THREE.CylinderGeometry(0.205, 0.195, 0.24, 18), torso: new THREE.CapsuleGeometry(0.17, 0.34, 6, 18),
-    neck: new THREE.CylinderGeometry(0.05, 0.056, 0.1, 12), head: new THREE.SphereGeometry(0.108, 22, 16),
-    hair: new THREE.SphereGeometry(0.114, 22, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
-    upper: new THREE.CapsuleGeometry(0.05, 0.19, 4, 10), sleeve: new THREE.CylinderGeometry(0.072, 0.064, 0.15, 14),
-    fore: new THREE.CapsuleGeometry(0.043, 0.19, 4, 10), hand: new THREE.SphereGeometry(0.05, 12, 10),
-    back: numGeo(0.22, 0.2, 0.124), front: numGeo(0.13, 0.2, 0.124),
     hit: new THREE.CylinderGeometry(0.36, 0.36, 2.0, 10), blob: new THREE.PlaneGeometry(1, 1),
+    glow: new THREE.RingGeometry(0.42, 0.62, 40), ring: new THREE.RingGeometry(0.45, 0.55, 40),
   };
   const MAT = {
-    skin: new THREE.MeshStandardMaterial({ color: 0xd9a77f, roughness: 0.62 }),
-    hair: new THREE.MeshStandardMaterial({ color: 0x2a1f19, roughness: 0.9 }),
-    shorts: new THREE.MeshStandardMaterial({ color: 0x1b2a4a, roughness: 0.75 }),
-    pad: new THREE.MeshStandardMaterial({ color: 0x15171c, roughness: 0.85 }),
-    sock: new THREE.MeshStandardMaterial({ color: 0xf2f3f5, roughness: 0.8 }),
-    shoe: new THREE.MeshStandardMaterial({ color: 0xf4f4f4, roughness: 0.45 }),
-    sole: new THREE.MeshStandardMaterial({ color: 0x2c3a52, roughness: 0.7 }),
     hit: new THREE.MeshBasicMaterial({ visible: false }),
     blob: new THREE.MeshBasicMaterial({ map: blobTexture(), transparent: true, depthWrite: false }),
   };
@@ -334,11 +312,9 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   // Форма команды из настроек. Цифры «запечены» в текстуру — при смене их цвета фигуры пересоздаются сами (ключ фигуры).
   function setKit(k = {}) {
     kit = { ...KIT_DEFAULT, ...Object.fromEntries(Object.entries(k).filter(([, v]) => v)) };
-    MAT.shorts.color.set(kit.shorts);
+    for (const m of [FM.shorts, FM.shortsReal, FM.trim]) m.color.set(kit.shorts);
   }
-  const shadowed = o => { o.castShadow = true; return o; };
-  const mesh = (geo, mat, parent, x = 0, y = 0, z = 0) => { const m = shadowed(new THREE.Mesh(geo, mat)); m.position.set(x, y, z); parent.add(m); return m; };
-  const joint = (parent, x = 0, y = 0, z = 0) => { const j = new THREE.Group(); j.position.set(x, y, z); parent.add(j); return j; };
+  let detail = 'real';
 
   // Подписи: 'num' — номер, 'name' — имя, 'full' — как записан в составе (номер и имя), 'none' — без подписи.
   let labelMode = 'num';
@@ -366,178 +342,139 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     const hit = new THREE.Mesh(G.hit, MAT.hit); // невидимый «корпус» для клика
     hit.position.y = 1.0; hit.userData.pid = p.id;
     g.add(hit);
-    const jersey = new THREE.MeshStandardMaterial({ color: 0xe9eaec, roughness: 0.55 });
-    const fig = joint(g);
-    const hips = joint(fig, 0, LEG, 0);
-    mesh(G.shorts, MAT.shorts, hips, 0, 0.0, 0).scale.set(1, 1, 0.82);
-    const leg = side => {
-      const hip = joint(hips, side * 0.1, -0.06, 0);
-      mesh(G.thigh, MAT.skin, hip, 0, -THIGH / 2, 0);
-      const knee = joint(hip, 0, -THIGH, 0);
-      mesh(G.pad, MAT.pad, knee, 0, -0.01, -0.01).scale.set(1, 1, 0.95);
-      mesh(G.shin, MAT.skin, knee, 0, -0.2, 0);
-      mesh(G.sock, MAT.sock, knee, 0, -0.33, 0);
-      const ankle = joint(knee, 0, -SHIN + 0.06, 0);
-      const shoe = mesh(G.shoe, MAT.shoe, ankle, 0, -0.01, -0.045); shoe.rotation.x = Math.PI / 2; shoe.scale.set(1, 1, 0.8);
-      mesh(G.sole, MAT.sole, ankle, 0, -0.052, -0.045);
-      return { hip, knee, ankle };
-    };
-    const legL = leg(-1), legR = leg(1);
-    const torso = joint(hips, 0, 0.08, 0);
-    const chest = mesh(G.torso, jersey, torso, 0, 0.27, 0); chest.scale.set(1.18, 1, 0.73);
-    mesh(G.neck, MAT.skin, torso, 0, 0.66, 0);
-    const head = joint(torso, 0, 0.79, 0);
-    mesh(G.head, MAT.skin, head);
-    const hair = mesh(G.hair, MAT.hair, head, 0, 0.012, 0.008); hair.rotation.x = -0.25;
-    // Номер на спине (к камере) и маленький — на груди.
     const numTex = p.num != null && p.num !== '' ? numberTexture(p.num, kit.number) : null;
-    if (numTex) {
-      const nm = new THREE.MeshStandardMaterial({ map: numTex, transparent: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 });
-      const back = new THREE.Mesh(G.back, nm); back.position.y = 0.33; torso.add(back);
-      const front = new THREE.Mesh(G.front, nm); front.position.set(0, 0.4, 0); front.rotation.y = Math.PI; torso.add(front);
-    }
-    const arm = side => {
-      const sh = joint(torso, side * 0.235, 0.5, 0);
-      mesh(G.upper, MAT.skin, sh, 0, -0.14, 0);
-      mesh(G.sleeve, jersey, sh, 0, -0.07, 0);
-      mesh(G.delt, jersey, sh, 0, -0.01, 0).scale.set(1, 1.1, 1);
-      const el = joint(sh, 0, -0.29, 0);
-      mesh(G.fore, MAT.skin, el, 0, -0.13, 0);
-      mesh(G.hand, MAT.skin, el, 0, -0.29, 0).scale.set(0.8, 1.15, 0.55);
-      return { sh, el };
-    };
-    const armL = arm(-1), armR = arm(1);
+    const rig = buildFigure(g, { detail, M: FM, numTex, id: p.id });
     // Пятно-тень под ногами: на полу всегда, в прыжке — бледнее и меньше.
     const bm = MAT.blob.clone(); bm.userData = {};
     const blob = new THREE.Mesh(G.blob, bm); blob.rotation.x = -Math.PI / 2; blob.position.y = 0.007; blob.scale.setScalar(0.9);
     g.add(blob);
     // Подсветка «скорее всего этот игрок»: пульсирующее янтарное кольцо.
-    const glow = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.62, 40), new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent: true, opacity: 0, depthWrite: false }));
+    const glow = new THREE.Mesh(G.glow, new THREE.MeshBasicMaterial({ color: COLORS.amber, transparent: true, opacity: 0, depthWrite: false }));
     glow.rotation.x = -Math.PI / 2; glow.position.y = 0.012;
     g.add(glow);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.55, 40), new THREE.MeshBasicMaterial({ color: COLORS.coral, transparent: true, opacity: 0 }));
+    const ring = new THREE.Mesh(G.ring, new THREE.MeshBasicMaterial({ color: COLORS.coral, transparent: true, opacity: 0 }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
     g.add(ring);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false }));
     sprite.position.y = 2.32; sprite.renderOrder = 10;
     g.add(sprite);
-    g.userData = { body: hit, jersey, fig, hips, torso, head, legL, legR, armL, armR, ring, glow, sprite, blob, key: tokenKey(p), phase: Math.random() * 6, act: null, actKey: null, seed: Math.random() * 10 };
+    g.userData = { body: hit, rig, jersey: rig.jersey, ring, glow, sprite, blob, key: tokenKey(p), phase: Math.random() * 6, act: null, actKey: null, seed: Math.random() * 10, P: { ...READY } };
     paintLabel(g, p);
     scene.add(g);
     return g;
   }
-  const tokenKey = p => `${p.num ?? ''}|${kit.number}`;
+  const tokenKey = p => `${p.num ?? ''}|${kit.number}|${detail}`;
   // Удаление фигуры: свои материалы и текстуры освобождаем, общие геометрии и материалы — нет.
-  const shared = new Set(Object.values(G));
+  const shared = new Set([...sharedFigureGeometries(), ...Object.values(G)]);
   function disposeToken(g) {
     g.traverse(o => {
+      if (o.isSkinnedMesh) o.skeleton.dispose();
       if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
       if (o.material && !o.material.userData.shared) { if (o.material.map !== MAT.blob.map) o.material.map?.dispose(); o.material.dispose(); }
     });
   }
 
-  // Длительность движений, с.
-  const ACT_DUR = { rec: 0.8, dig: 0.8, set: 0.75, att: 1.35, blk: 1.05, serve: 1.3 };
-  const clamp01 = f => Math.max(0, Math.min(1, f));
-  const bell = f => Math.sin(Math.PI * clamp01(f));
-  const mix = (a, b, f) => a + (b - a) * clamp01(f);
-  const ease = f => { f = clamp01(f); return f * f * (3 - 2 * f); };
-  // Поза на кадр. Углы плеча: 0 — рука вниз, π/2 — вперёд (к сетке), π — вверх, больше π — замах за голову.
-  // Локоть: 0 — прямая рука, больше — согнута. bend — угол в бедре (колено сгибается вдвое сильнее, стопа на полу).
+  // Время: движения в motion.js — в секундах «как в жизни», на экране — в SPEED раз быстрее.
+  const ms = s => (s / SPEED) * 1000;
+  const TMP = {};
+  const JUMP = { att: 0.75, blk: 0.6, serve: 0.5 };
+  function startAct(rec, type, t0, extra = {}) {
+    const A = ACTIONS[type];
+    rec.group.userData.act = { type, t0, tc: ms(A.tc), dur: ms(A.dur), hold: false, rel: null, ...extra };
+    return rec.group.userData.act;
+  }
+  const forwardOf = yaw => new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  const rotY = (v, yaw) => new THREE.Vector3(v.x * Math.cos(yaw) + v.z * Math.sin(yaw), v.y, -v.x * Math.sin(yaw) + v.z * Math.cos(yaw));
+  // Где мяч в момент касания относительно ступней игрока (лицом к сетке): считаем один раз на «пробной» фигуре.
+  const offCache = new Map();
+  function contactOffset(type) {
+    const key = `${detail}:${type}`;
+    if (!offCache.has(key)) {
+      const root = new THREE.Group();
+      const rig = buildFigure(root, { detail, M: FM, numTex: null, id: '' });
+      rig.fig.scale.setScalar(1);
+      applyPose(rig, sampleAction(type, ACTIONS[type].tc), 0);
+      root.updateMatrixWorld(true);
+      offCache.set(key, anchorOf(rig, ACTIONS[type].anchor).clone());
+      root.traverse(o => { if (o.isSkinnedMesh) o.skeleton.dispose(); if (o.material && !o.material.userData.shared) o.material.dispose(); });
+    }
+    return offCache.get(key);
+  }
+
+  // Перемещение по площадке: разгон и торможение (не «телепорт» и не равномерное скольжение).
+  // На шаге розыгрыша игрок бежит к точке касания (goal); на разбеге и подаче позицию задаёт само движение (path).
+  const VMAX = 6.5, ACC = 22;
+  function updateMotion(rec, dt, now) {
+    const u = rec.group.userData, pos = rec.group.position, a = u.act;
+    rec.vel ??= new THREE.Vector3();
+    if (a?.path && now >= a.t0) {
+      const f = sampleAction(a.type, actTime(a, now), TMP).fwd;
+      // Если к началу разбега игрок не совсем добежал — подтягиваем плавно, без скачка.
+      a.path.blend ??= { x: pos.x - a.path.o.x - a.path.d.x * f, z: pos.z - a.path.o.z - a.path.d.z * f, t: now };
+      const k = Math.max(0, 1 - (now - a.path.blend.t) / 300);
+      const nx = a.path.o.x + a.path.d.x * f + a.path.blend.x * k, nz = a.path.o.z + a.path.d.z * f + a.path.blend.z * k;
+      rec.vel.set((nx - pos.x) / Math.max(dt, 1e-3), 0, (nz - pos.z) / Math.max(dt, 1e-3));
+      pos.x = nx; pos.z = nz;
+      rec.driven = true;
+      return;
+    }
+    rec.driven = false;
+    // Цель «добежать к касанию» держится, пока игрок держит мяч, и ещё немного после.
+    const holding = a?.scripted && a.hold && (a.rel == null || now < a.rel);
+    if (rec.goal && !holding && now > rec.goal.t + 600) rec.goal = null;
+    const to = rec.goal?.to ?? rec.target;
+    const dx = to.x - pos.x, dz = to.z - pos.z, dist = Math.hypot(dx, dz);
+    const v = dist < 0.01 ? 0 : Math.min(VMAX, Math.sqrt(2 * ACC * dist));
+    const wx = dist > 1e-4 ? (dx / dist) * v : 0, wz = dist > 1e-4 ? (dz / dist) * v : 0;
+    let ex = wx - rec.vel.x, ez = wz - rec.vel.z;
+    const el = Math.hypot(ex, ez), lim = ACC * dt * 1.6;
+    if (el > lim) { ex *= lim / el; ez *= lim / el; }
+    rec.vel.x += ex; rec.vel.z += ez;
+    pos.x += rec.vel.x * dt; pos.z += rec.vel.z * dt;
+  }
+
+  // Поза на кадр: движение (если идёт) или стойка, поверх — бег по скорости; разворот — плавно.
   function animate(rec, dt, now) {
-    const u = rec.group.userData, pos = rec.group.position;
-    rec.prev ??= pos.clone();
-    const spd = Math.min(8, pos.distanceTo(rec.prev) / Math.max(dt, 1e-3));
-    rec.prev.copy(pos);
-    rec.spd = mix(rec.spd ?? 0, spd, dt * 8);
-    const run = Math.min(1, rec.spd / 2.2);
-    u.phase += dt * (5 + rec.spd * 3);
-    // Стойка готовности: колени согнуты, руки перед собой.
-    let bend = 0.32 + 0.03 * Math.sin(now / 520 + u.seed), jump = 0, tuck = 0, lean = 0.22 + run * 0.15, twist = 0, dz = 0;
-    let sw = Math.sin(u.phase) * 0.8 * run;
-    let aL = 0.62 - sw * 0.7, aR = 0.62 + sw * 0.7, eL = 0.8 + run * 0.6, eR = 0.8 + run * 0.6, spread = 0.16;
-    const a = u.act;
-    if (a) {
-      const f = (now - a.t0) / 1000 / ACT_DUR[a.type];
-      if (f >= 1) u.act = null;
-      else {
-        sw *= 0.15;
-        if (a.type === 'rec' || a.type === 'dig') {
-          // Приём снизу: глубокий присед, прямые руки «площадкой», ладони вместе.
-          const k = bell(f), deep = a.type === 'dig' ? 0.95 : 0.78;
-          bend = mix(bend, deep, k * 1.6); lean = 0.25 + 0.4 * k;
-          aL = aR = mix(0.75, (a.type === 'dig' ? 0.75 : 0.95) + lean, f * 4); eL = eR = mix(1.1, 0.05, f * 5); spread = -0.13;
-        }
-        if (a.type === 'set') {
-          // Пас сверху: ладони над лбом, локти согнуты → выпрямление вверх-вперёд.
-          bend = mix(0.5, 0.15, (f - 0.35) * 3); jump = 0.08 * bell((f - 0.35) / 0.5); lean = -0.05;
-          aL = aR = f < 0.45 ? mix(0.5, 2.1, f * 4) : mix(2.1, 2.75, (f - 0.45) * 4); eL = eR = f < 0.45 ? mix(1.1, 1.25, f * 4) : mix(1.25, 0.15, (f - 0.45) * 4); spread = 0.24;
-        }
-        if (a.type === 'att') {
-          // Разбег (два шага к сетке) → замах обеими руками назад → прыжок → «лук» → удар → приземление.
-          dz = mix(1.3, 0, ease(f / 0.32));
-          if (f < 0.32) { sw = Math.sin(f * 30) * 0.55 * (1 - clamp01((f - 0.2) * 8)); bend = mix(0.35, 0.75, (f - 0.18) * 8); lean = 0.35 + 0.2 * clamp01((f - 0.18) * 8); }
-          aL = aR = f < 0.32 ? mix(0.5, -1.0, (f - 0.12) * 6) : 0;
-          if (f >= 0.32) {
-            jump = 1.0 * bell((f - 0.32) / 0.56);
-            bend = f < 0.36 ? mix(0.8, 0.1, (f - 0.32) * 25) : 0.15; tuck = 0.9 * bell((f - 0.38) / 0.45);
-            aL = f < 0.54 ? mix(-1.0, 2.9, (f - 0.32) * 8) : mix(2.9, 0.5, (f - 0.54) * 5);
-            aR = f < 0.54 ? mix(-1.0, 3.45, (f - 0.32) * 8) : mix(3.45, 1.1, (f - 0.54) * 10);
-            eL = 0.3; eR = f < 0.54 ? mix(0.4, 1.9, (f - 0.4) * 8) : mix(1.9, 0.05, (f - 0.54) * 14);
-            lean = f < 0.54 ? mix(0.1, -0.35, (f - 0.32) * 6) : mix(-0.35, 0.5, (f - 0.54) * 8);
-            twist = f < 0.54 ? mix(0, 0.45, (f - 0.36) * 6) : mix(0.45, -0.35, (f - 0.54) * 8);
-            spread = 0.1;
-          }
-          if (f > 0.86) { bend = mix(0.15, 0.75, bell((f - 0.86) / 0.14)); lean = mix(0.5, 0.35, (f - 0.86) * 7); }
-        }
-        if (a.type === 'blk') {
-          // Блок: присед → прыжок вертикально, прямые руки вверх и чуть вперёд, ладони широко.
-          bend = f < 0.22 ? mix(0.32, 0.7, f * 5) : f > 0.86 ? mix(0.1, 0.6, bell((f - 0.86) / 0.14)) : 0.1;
-          jump = f > 0.22 ? 0.78 * bell((f - 0.22) / 0.64) : 0;
-          aL = aR = f < 0.22 ? mix(0.5, 1.9, f * 5) : mix(1.9, 2.85, (f - 0.22) * 6);
-          eL = eR = f < 0.22 ? 1.5 : mix(1.5, 0, (f - 0.22) * 6);
-          spread = f < 0.22 ? 0.1 : 0.2; lean = -0.04; tuck = 0.15 * bell((f - 0.22) / 0.64);
-          if (f > 0.75) { aL = aR = mix(2.85, 0.6, (f - 0.75) * 4); eL = eR = mix(0, 1.1, (f - 0.75) * 4); }
-        }
-        if (a.type === 'serve') {
-          // Подача в прыжке: подброс левой, разбег, замах правой, удар над головой.
-          dz = mix(0.9, 0, ease((f - 0.1) / 0.35));
-          if (f < 0.45) { sw = Math.sin(f * 24) * 0.7 * clamp01((f - 0.1) * 6); }
-          aL = f < 0.3 ? mix(0.5, 2.9, f * 5) : mix(2.9, 0.4, (f - 0.55) * 4);
-          aR = f < 0.45 ? mix(0.4, 3.4, (f - 0.25) * 6) : mix(3.4, 1.0, (f - 0.58) * 9);
-          eL = 0.2; eR = f < 0.58 ? mix(0.6, 1.8, (f - 0.3) * 6) : mix(1.8, 0.05, (f - 0.58) * 12);
-          if (f > 0.42) { jump = 0.55 * bell((f - 0.42) / 0.45); tuck = 0.5 * bell((f - 0.45) / 0.38); bend = 0.15; }
-          else bend = mix(0.32, 0.6, (f - 0.3) * 8);
-          lean = f < 0.58 ? mix(0.1, -0.3, (f - 0.4) * 6) : mix(-0.3, 0.4, (f - 0.58) * 8);
-          twist = f < 0.58 ? mix(0, 0.4, (f - 0.35) * 6) : mix(0.4, -0.3, (f - 0.58) * 8);
-          if (f > 0.87) bend = mix(0.15, 0.6, bell((f - 0.87) / 0.13));
-        }
-      }
+    const u = rec.group.userData, rig = u.rig, P = u.P;
+    let a = u.act, s = 0;
+    if (a && now >= a.t0) {
+      s = actTime(a, now);
+      if (s >= ACTIONS[a.type].dur) { u.act = a = null; rec.yawOverride = null; }
     }
-    // Разворот: плавно к нужному углу (по кратчайшей дуге). Разбег идёт вдоль направления взгляда.
-    let dy = (rec.yaw ?? 0) - u.fig.rotation.y;
+    const active = !!a && now >= a.t0;
+    if (active) sampleAction(a.type, s, P);
+    else {
+      Object.assign(P, READY);
+      const br = Math.sin(now / 520 + u.seed); // дыхание и лёгкое покачивание в стойке
+      P.kL += 0.05 * br; P.hL += 0.025 * br; P.kR += 0.05 * br; P.hR += 0.025 * br; P.lean += 0.015 * Math.sin(now / 900 + u.seed);
+    }
+    // Разворот: плавно к нужному углу (по кратчайшей дуге).
+    const ry0 = rig.fig.rotation.y;
+    let dy = (rec.yawOverride ?? rec.yaw ?? 0) - ry0;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    u.fig.rotation.y += dy * Math.min(1, dt * 7);
-    const ry = u.fig.rotation.y;
-    u.fig.position.set(Math.sin(ry) * dz, jump, Math.cos(ry) * dz);
-    u.hips.position.y = 0.06 + LEG * Math.cos(bend) + 0.035 * Math.abs(Math.sin(u.phase)) * run;
-    // Ноги: бедро вперёд на bend ± мах при беге, колено сгибается (сильнее у ноги, которая сзади), стопа — параллельно полу.
-    for (const [L, s] of [[u.legL, sw], [u.legR, -sw]]) {
-      const hip = bend + s + tuck * 0.7;
-      const knee = -2 * bend - Math.max(0, -s) * 1.1 - tuck * 1.6;
-      L.hip.rotation.x = hip; L.knee.rotation.x = knee;
-      L.ankle.rotation.x = jump > 0.05 ? -(hip + knee) - 0.5 * clamp01(jump * 4) : -(hip + knee);
-    }
-    u.torso.rotation.x = -lean;
-    u.torso.rotation.y = twist;
-    u.head.rotation.x = lean * 0.6 - (aR > 2.4 ? 0.25 : 0); // в прыжке смотрим на мяч
-    // Плечо: вращаем вперёд-вверх; локоть сгибает предплечье вперёд.
-    u.armL.sh.rotation.x = aL; u.armR.sh.rotation.x = aR;
-    u.armL.sh.rotation.z = -spread; u.armR.sh.rotation.z = spread;
-    u.armL.el.rotation.x = eL; u.armR.el.rotation.x = eR;
+    rig.fig.rotation.y += dy * Math.min(1, dt * (active ? 10 : 7));
+    const ry = rig.fig.rotation.y;
+    // Бег: скорость в системе игрока — вперёд/назад и вбок (приставной шаг).
+    const vx = rec.vel?.x ?? 0, vz = rec.vel?.z ?? 0, sp = Math.hypot(vx, vz);
+    const vf = -(vx * Math.sin(ry) + vz * Math.cos(ry)), vs = vx * Math.cos(ry) - vz * Math.sin(ry);
+    u.phase += dt * (4 + sp * 2.4);
+    if (!rec.driven) gait(P, u.phase, vf, vs, active ? (a.type === 'blk' ? 0 : 0.8) : 1, active ? 0 : 1);
+    const jump = active ? jumpAt(a.type, s, a.H ?? JUMP[a.type] ?? 0) : 0;
+    applyPose(rig, P, jump);
+    // Движение «на месте» (повтор по видео): разбег/подача рисуются со смещением назад и приходят в точку.
+    let ox = 0, oz = 0;
+    if (active && a.local) { const f = P.fwd - a.local; ox = -Math.sin(ry) * f; oz = -Math.cos(ry) * f; }
+    rig.fig.position.x = ox; rig.fig.position.z = oz;
     // Тень под ногами: в прыжке меньше и бледнее.
     const sc = 0.9 - jump * 0.25;
-    u.blob.scale.set(sc, sc, sc); u.blob.position.x = Math.sin(ry) * dz; u.blob.position.z = Math.cos(ry) * dz; u.blob.material.opacity = 1 - jump * 0.45;
+    u.blob.scale.set(sc, sc, sc); u.blob.position.x = ox; u.blob.position.z = oz; u.blob.material.opacity = 1 - jump * 0.45;
+  }
+  // Перенести состояние со старой фигуры на новую (сменилась детализация или номер).
+  function carry(from, to) {
+    to.position.copy(from.position);
+    const a = from.userData, b = to.userData;
+    Object.assign(b, { act: a.act, actKey: a.actKey, phase: a.phase });
+    b.rig.fig.rotation.y = a.rig.fig.rotation.y;
   }
   function setPlayers(list) {
     const seen = new Set();
@@ -545,10 +482,9 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       seen.add(p.id);
       let rec = players.get(p.id);
       if (!rec || rec.group.userData.key !== tokenKey(p)) {
-        if (rec) { scene.remove(rec.group); disposeToken(rec.group); }
-        rec = { group: playerToken(p), target: toWorld(p.spot) };
-        rec.group.position.copy(rec.target);
-        players.set(p.id, rec);
+        const g = playerToken(p);
+        if (rec) { carry(rec.group, g); scene.remove(rec.group); disposeToken(rec.group); rec.group = g; }
+        else { rec = { group: g, vel: new THREE.Vector3() }; g.position.copy(toWorld(p.spot)); players.set(p.id, rec); }
       }
       rec.info = p;
       paintLabel(rec.group, p);
@@ -562,12 +498,23 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       const u = rec.group.userData;
       u.jersey.color.set(p.libero ? kit.libero : p.setter ? kit.setter : kit.main);
       u.jersey.emissive.set(p.hl ? 0x5a4512 : 0x000000);
-      // Движение: новое действие запускается, когда меняется его ключ.
-      if (p.act && p.act.key !== u.actKey) { u.actKey = p.act.key; u.act = { type: p.act.type, t0: clock() }; }
+      // Движение по ключу (повтор по видео): разбег и подача — «на месте», со смещением.
+      if (p.act && p.act.key !== u.actKey) {
+        u.actKey = p.act.key;
+        const t = p.act.type;
+        if (ACTIONS[t]) startAct(rec, t, clock(), t === 'att' || t === 'serve' ? { local: ACTIONS[t].keys.at(-1)[1].fwd } : {});
+      }
       rec.group.userData.ring.material.opacity = p.selected ? 1 : p.server ? 0.55 : 0;
       rec.group.userData.ring.material.color.set(p.selected ? COLORS.coral : COLORS.mint);
     }
     for (const [id, rec] of players) if (!seen.has(id)) { scene.remove(rec.group); disposeToken(rec.group); players.delete(id); }
+  }
+  // Детализация фигур: 'real' — реалистичные, 'simple' — минималистичные (легче для слабых ноутбуков).
+  function setDetail(mode) {
+    mode = mode === 'simple' ? 'simple' : 'real';
+    if (mode === detail) return;
+    detail = mode;
+    setPlayers([...players.values()].map(r => r.info).filter(Boolean));
   }
   function setLabelMode(mode) {
     labelMode = mode;
@@ -658,7 +605,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       pv.ring.visible = true;
       pv.ring.material.color.set(t.color ?? COLORS.white);
       pv.ring.position.set(pts.at(-1).x, 0.015, pts.at(-1).z);
-      if (t.ball) { pv.tip.visible = true; pv.tip.position.copy(t.ballAtEnd ? pts.at(-1) : pts[Math.round(pts.length * 0.35)]); }
+      if (t.ball && !D.on) { pv.tip.visible = true; pv.tip.position.copy(t.ballAtEnd ? pts.at(-1) : pts[Math.round(pts.length * 0.35)]); }
     });
   }
   const marker = (p, color, r = 0.32) => {
@@ -707,11 +654,12 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   const ballBlob = new THREE.Mesh(G.blob, MAT.blob.clone()); ballBlob.material.userData = {};
   ballBlob.rotation.x = -Math.PI / 2; ballBlob.position.y = 0.006; ballBlob.visible = false; scene.add(ballBlob);
   const ballPrev = new THREE.Vector3(), spinAxis = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
-  function spinBall(dt) {
+  function spinBall(dt, held = false) {
     ballBlob.visible = ball.visible;
     if (!ball.visible) return;
     const d = ball.position.clone().sub(ballPrev), dist = d.length();
     ballPrev.copy(ball.position);
+    if (held) { ballBlob.position.x = ball.position.x; ballBlob.position.z = ball.position.z; return; } // в руках не крутится
     ballBlob.position.x = ball.position.x; ballBlob.position.z = ball.position.z;
     const s = Math.max(0.12, 0.5 - ball.position.y * 0.08);
     ballBlob.scale.set(s, s, s); ballBlob.material.opacity = Math.max(0.25, 1 - ball.position.y * 0.18);
@@ -722,9 +670,10 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   let flight = null, manualBall = false;
   // Мяч по времени видео (повтор розыгрыша): позицию задаёт студия, анимация полёта выключается.
   function setBall(p) {
+    if (p && !manualBall && D.on) resetScript(); // повтор по видео: шаги ввода сбрасываем, потом — заново с итога
     manualBall = !!p;
     if (p) { flight = null; ball.visible = true; ball.position.copy(toWorld(p, p.h ?? 0.5)); }
-    else if (!flight) ball.visible = false;
+    else if (!flight && !D.on) ball.visible = false;
   }
   let trailsKey = '';
   function setTrails(list = [], { animate = true } = {}) {
@@ -749,8 +698,229 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       end.rotation.x = -Math.PI / 2; end.position.set(pts.at(-1).x, 0.009, pts.at(-1).z);
       trails.add(end);
     }
+    if (D.on) return; // во время ввода мячом управляет сценарий шагов
     flight = animate && curves.length && !manualBall ? { curves, k: 0, t: 0 } : null;
     ball.visible = !!flight || manualBall;
+  }
+
+  // ---------- Мяч по шагам розыгрыша ----------
+  // Во время ввода мяч ведёт «сценарий» из студии: список полётов розыгрыша [{ id, kind, from, to, y0, y1, apex,
+  // by — кто отдаёт, byAct — его движение (подача), catcher — кто ловит, catchAs — как (rec/dig/set/att/blk) }].
+  // Новый полёт начинается только когда его добавили (выбрали игрока): мяч летит по физике, а ловящий
+  // успевает к нему — разбег и прыжок рассчитаны от момента касания. Пока следующий шаг не отмечен,
+  // мяч ждёт у игрока (в «площадке» приёма, в ладонях связующего, у руки нападающего в прыжке).
+  const HOLDS = { rec: 1, dig: 1, set: 1, att: 1 };
+  const D = { on: false, rally: null, segs: [], queue: [], cur: null, hold: null, free: null, pending: null, pendingAt: 0 };
+  const _anc = new THREE.Vector3(), _hold = new THREE.Vector3();
+  const smooth01 = x => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+  const busy = now => !!(D.cur || D.queue.length || (D.free && !D.free.rest && now - D.free.t0 < 2200));
+  function cancelScripted() {
+    for (const rec of players.values()) {
+      const u = rec.group.userData;
+      if (u.act?.scripted) u.act = null;
+      rec.goal = null; rec.yawOverride = null;
+    }
+  }
+  function resetScript() { cancelScripted(); Object.assign(D, { rally: null, segs: [], queue: [], cur: null, hold: null, free: null, pending: null }); }
+  function setScript(s) {
+    if (!s) {
+      if (D.on) { resetScript(); ball.visible = !!flight || manualBall; }
+      D.on = false;
+      return;
+    }
+    if (!D.on) flight = null; // вместо «пролёта» всего розыгрыша — по шагам
+    D.on = true;
+    if (manualBall) return; // идёт повтор по видео — сценарий применится, когда он закончится
+    if (D.rally !== s.rally) {
+      // Новый розыгрыш: даём долететь последнему мячу (удар, эйс), потом — расстановка нового.
+      if (D.rally !== null && busy(clock())) { D.pending = s; D.pendingAt = clock(); return; }
+      return snap(s);
+    }
+    D.pending = null;
+    const old = D.segs;
+    let n = 0;
+    while (n < old.length && n < s.segs.length && old[n].id === s.segs[n].id) n++;
+    if (n === old.length) {
+      D.queue.push(...s.segs.slice(n));
+      D.segs = s.segs;
+      return;
+    }
+    snap(s); // шаг отменили или переписали — сразу к итогу, без полёта
+  }
+  // Сразу показать итог сценария: кто держит мяч (в позе касания) или где мяч лежит.
+  function snap(s) {
+    cancelScripted();
+    Object.assign(D, { rally: s.rally, segs: s.segs, queue: [], cur: null, hold: null, free: null, pending: null });
+    const last = s.segs.at(-1);
+    if (!last) {
+      const r = s.start?.hold && players.get(s.start.hold);
+      D.hold = r ? { pid: s.start.hold, part: 'handL' } : null;
+      ball.visible = !!r;
+      return;
+    }
+    const rec = last.catcher && players.get(last.catcher);
+    if (rec && HOLDS[last.catchAs]) {
+      const plan = catchPlan(rec, last);
+      scheduleCatch(rec, plan, clock());
+      D.hold = { pid: last.catcher, part: ACTIONS[plan.type].anchor };
+      ball.visible = true;
+      return;
+    }
+    ball.visible = true;
+    ball.position.copy(toWorld(last.to, BALL_R));
+    D.free = { v: new THREE.Vector3(), rest: true, t0: clock() };
+  }
+
+  // Как игрок встретит мяч: куда встать (root), куда смотреть, где будет мяч в момент касания.
+  function catchPlan(rec, seg) {
+    const type = seg.catchAs, P = toWorld(seg.to);
+    let yaw = rec.yaw ?? 0;
+    if ((type === 'rec' || type === 'dig') && seg.from) { const f = toWorld(seg.from); yaw = Math.atan2(-(f.x - P.x), -(f.z - P.z)); }
+    if (type === 'att') {
+      // Разбег — к мячу со стороны игрока, в основном от сетки к ней (как в жизни: из-за трёхметровой и с края).
+      const c = rec.group.position;
+      let bx = c.x - P.x, bz = c.z - P.z;
+      const bl = Math.hypot(bx, bz) || 1;
+      bx = (bx / bl) * 0.6; bz = (bz / bl) * 0.6 + 1;
+      const vl = Math.hypot(bx, bz);
+      yaw = Math.atan2(bx / vl, bz / vl);
+    }
+    const off = rotY(contactOffset(type), yaw);
+    const plan = { type, yaw, off, root: new THREE.Vector3(P.x - off.x, 0, P.z - off.z), H: 0 };
+    if (type === 'att') plan.H = THREE.MathUtils.clamp((seg.y1 ?? 3) - off.y, 0.4, 1.0);
+    if (type === 'blk') plan.H = JUMP.blk;
+    plan.ballAt = new THREE.Vector3(P.x, off.y + jumpAt(type, ACTIONS[type].tc, plan.H), P.z);
+    return plan;
+  }
+  const fwdAt = (type, s) => sampleAction(type, s, TMP).fwd;
+  // Сколько времени (мс) нужно игроку до касания: добежать и выполнить подготовку (у нападающего — весь разбег).
+  function leadTime(rec, plan) {
+    const A = ACTIONS[plan.type], pos = rec.group.position;
+    if (plan.type === 'att') {
+      const F = fwdAt('att', A.tc), f = forwardOf(plan.yaw);
+      const jd = Math.hypot(pos.x - (plan.root.x - f.x * F), pos.z - (plan.root.z - f.z * F));
+      return (jd > 0.25 ? (jd / VMAX + 0.35) * 1000 : 0) + ms(A.tc);
+    }
+    const d = Math.hypot(pos.x - plan.root.x, pos.z - plan.root.z);
+    return Math.max(ms(A.tc), d > 0.2 ? (d / VMAX + 0.3) * 1000 + 80 : 0);
+  }
+  // Поставить движение ловящего так, чтобы касание пришлось ровно на момент прилёта мяча.
+  function scheduleCatch(rec, plan, arrival) {
+    const A = ACTIONS[plan.type], t0 = arrival - ms(A.tc);
+    const extra = { scripted: true, hold: !!HOLDS[plan.type], H: plan.H };
+    if (plan.type === 'att') {
+      const f = forwardOf(plan.yaw), F = fwdAt('att', A.tc);
+      const o = new THREE.Vector3(plan.root.x - f.x * F, 0, plan.root.z - f.z * F);
+      extra.path = { o, d: f };
+      rec.goal = { to: o, t: t0 };
+    } else if (plan.type !== 'blk') rec.goal = { to: plan.root, t: arrival };
+    rec.yawOverride = plan.type === 'set' || plan.type === 'blk' ? null : plan.yaw;
+    return startAct(rec, plan.type, t0, extra);
+  }
+
+  function launchNext(now) {
+    const seg = D.queue.shift();
+    const cur = { seg, launchAt: now, p0: null, apex: seg.apex ?? 3 };
+    const holder = D.hold && players.get(D.hold.pid);
+    const thrower = seg.by && players.get(seg.by);
+    if (seg.byAct === 'serve' && thrower) {
+      // Подача: мяч в левой руке → подброс → удар правой в прыжке; мяч уходит в момент удара.
+      const a = startAct(thrower, 'serve', now, { scripted: true, path: { o: thrower.group.position.clone(), d: forwardOf(thrower.yaw ?? 0) } });
+      D.hold = { pid: seg.by, part: 'handL' };
+      cur.launchAt = now + a.tc;
+      cur.toss = { pid: seg.by, at: now + ms(ACTIONS.serve.toss) };
+    } else if (holder) {
+      cur.launchAt = now + (D.hold.part === 'hands' ? 40 : 0);
+    } else {
+      cur.p0 = toWorld(seg.from, seg.y0 ?? 1); // мяч от соперника — из точки, откуда его ударили
+      D.hold = null; D.free = null;
+    }
+    const p0 = cur.p0 ?? (holder ? anchorOf(holder.group.userData.rig, D.hold.part, new THREE.Vector3()) : toWorld(seg.from, seg.y0 ?? 1));
+    const catcher = seg.catcher && players.get(seg.catcher);
+    let p1 = toWorld(seg.to, seg.y1 ?? 0.1);
+    if (catcher && ACTIONS[seg.catchAs]) { cur.plan = catchPlan(catcher, seg); p1 = cur.plan.ballAt; cur.catcher = seg.catcher; }
+    cur.T = ms(flightTime(seg.kind, Math.hypot(p1.x - p0.x, p1.z - p0.z), p0.y, p1.y, cur.apex));
+    if (cur.plan) {
+      // Игрок не успевает — мяч задерживается в руках у отдающего (нападающий успевает разбежаться).
+      const arrival = Math.max(cur.launchAt + cur.T, now + leadTime(catcher, cur.plan));
+      cur.launchAt = arrival - cur.T;
+      scheduleCatch(catcher, cur.plan, arrival);
+    }
+    const ha = holder?.group.userData.act;
+    if (ha?.scripted && ha.hold) ha.rel = cur.launchAt; // держал мяч — движение продолжается с момента броска
+    cur.p1 = p1;
+    D.cur = cur;
+  }
+  function holdBall() {
+    const r = D.hold && players.get(D.hold.pid);
+    if (!r) { ball.visible = false; return; }
+    ball.visible = true;
+    ball.position.copy(anchorOf(r.group.userData.rig, D.hold.part, _hold));
+  }
+  // После полёта без ловящего мяч летит сам: сила тяжести, отскок от пола, сетка, качение.
+  function freeBall(dt) {
+    const f = D.free;
+    if (f.rest) return;
+    const h = dt * SPEED, p = ball.position, z0 = p.z;
+    f.v.y -= GRAVITY * h;
+    p.addScaledVector(f.v, h);
+    if (Math.sign(z0) !== Math.sign(p.z) && Math.abs(p.x) < 4.6 && p.y < NET_H) { p.z = z0; f.v.z *= -0.25; f.v.x *= 0.5; }
+    if (Math.abs(p.x) > 9.6) { p.x = Math.sign(p.x) * 9.6; f.v.x *= -0.4; }
+    if (p.z < -15.6) { p.z = -15.6; f.v.z *= -0.4; }
+    if (p.y < BALL_R) {
+      p.y = BALL_R;
+      if (Math.abs(f.v.y) > 0.9) { f.v.y = -f.v.y * 0.55; f.v.x *= 0.78; f.v.z *= 0.78; }
+      else {
+        f.v.y = 0;
+        const k = Math.max(0, 1 - 1.4 * h);
+        f.v.x *= k; f.v.z *= k;
+        if (Math.hypot(f.v.x, f.v.z) < 0.05) f.rest = true;
+      }
+    }
+  }
+  function stepScript(now, dt) {
+    if (D.pending && (!busy(now) || now - D.pendingAt > 3500)) { const s = D.pending; D.pending = null; snap(s); }
+    if (!D.cur && D.queue.length) launchNext(now);
+    const c = D.cur;
+    if (c) {
+      ball.visible = true;
+      if (now < c.launchAt) {
+        if (c.toss && now >= c.toss.at) {
+          // Подброс: из левой руки вверх к месту удара правой.
+          const r = players.get(c.toss.pid);
+          if (!r) return;
+          c.toss.p0 ??= ball.position.clone();
+          const k = (now - c.toss.at) / Math.max(1, c.launchAt - c.toss.at);
+          anchorOf(r.group.userData.rig, 'spike', _anc);
+          ball.position.lerpVectors(c.toss.p0, _anc, k).y += 1.1 * 4 * k * (1 - k);
+        } else holdBall();
+        return;
+      }
+      if (!c.p0) c.p0 = ball.position.clone();
+      const u = Math.min(1, (now - c.launchAt) / c.T);
+      const q = arcAt(c.p0, c.p1, c.apex, u);
+      ball.position.set(q.x, q.y, q.z);
+      // Под конец мяч «притягивается» к рукам ловящего — касание точно в ладони/на предплечья.
+      const r = c.catcher && players.get(c.catcher);
+      if (r) { anchorOf(r.group.userData.rig, ACTIONS[c.plan.type].anchor, _anc); ball.position.addScaledVector(_anc.sub(c.p1), smooth01((u - 0.5) / 0.5)); }
+      if (u >= 1) {
+        D.cur = null;
+        if (r && HOLDS[c.plan.type]) { D.hold = { pid: c.catcher, part: ACTIONS[c.plan.type].anchor }; D.free = null; return; }
+        D.hold = null;
+        const v = arcVelocity(c.p0, c.p1, c.apex, (c.T / 1000) * SPEED);
+        const fv = new THREE.Vector3(v.x, v.y, v.z);
+        // Блок: очко — мяч отскакивает к сопернику; касание — мягко к нам, вверх; блок-аут — в сторону.
+        if (c.plan?.type === 'blk') {
+          if (c.seg.deflect === 'touch') fv.set(fv.x * 0.3, 2.5, fv.z * 0.25);
+          else if (c.seg.deflect === 'out') fv.set(fv.x * 0.6 + Math.sign(ball.position.x || 1) * 3, 1.2, fv.z * 0.5);
+          else fv.set(fv.x * 0.3, -1, -fv.z * 0.35);
+        }
+        D.free = { v: fv, rest: false, t0: now };
+      }
+      return;
+    }
+    if (D.hold) holdBall();
+    else if (D.free) freeBall(dt);
   }
 
   // ---------- Камера ----------
@@ -850,23 +1020,26 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       controls.target.lerp(camAnim.target, e * 0.35);
       if (camAnim.k >= 1 && camera.position.distanceTo(camAnim.pos) < 0.05) camAnim = null;
     }
-    // Переходы игроков: фишки плавно едут в новые зоны при смене расстановки.
-    for (const rec of players.values()) rec.group.position.lerp(rec.target, Math.min(1, dt * 5));
-    // Простая физика: фишки не входят друг в друга. Игрок у мяча (pinned) не сдвигается — расталкивает остальных.
+    // Перемещения игроков: разгон и торможение к своей точке (или к мячу), разбег — по движению.
+    for (const rec of players.values()) updateMotion(rec, dt, now);
+    // Простая физика: фишки не входят друг в друга. Игрок у мяча (pinned) и игрок на разбеге не сдвигаются — расталкивают остальных.
     const recs = [...players.values()], R = 0.72;
     for (let it = 0; it < 3; it++) for (let i = 0; i < recs.length; i++) for (let j = i + 1; j < recs.length; j++) {
       const a = recs[i].group.position, b = recs[j].group.position;
       const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
       if (d >= R || d === 0) continue;
       const push = R - d, nx = dx / d, nz = dz / d;
-      const wa = recs[i].pinned ? 0 : recs[j].pinned ? 1 : 0.5, wb = 1 - wa;
+      const fa = recs[i].pinned || recs[i].driven, fb = recs[j].pinned || recs[j].driven;
+      if (fa && fb) continue;
+      const wa = fa ? 0 : fb ? 1 : 0.5, wb = 1 - wa;
       a.x -= nx * push * wa; a.z -= nz * push * wa;
       b.x += nx * push * wb; b.z += nz * push * wb;
     }
     // Пульс подсветки.
     const pulse = 0.55 + 0.4 * Math.sin(now / 160);
     for (const rec of players.values()) { rec.group.userData.glow.material.opacity = rec.hl ? pulse : 0; animate(rec, dt, now); }
-    if (flight) {
+    if (D.on && !manualBall) stepScript(now, dt);
+    else if (flight) {
       flight.t += dt * 1.6;
       // Мяч пролетает розыгрыш один раз и остаётся в последней точке.
       if (flight.t >= 1) {
@@ -874,7 +1047,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       }
       ball.position.copy(flight.curves[flight.k].getPointAt(Math.min(1, flight.t)));
     }
-    spinBall(dt);
+    spinBall(dt, D.on && D.hold && !D.cur);
     controls.update();
     renderer.render(scene, camera);
   });
@@ -886,7 +1059,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   }
 
   return {
-    setPlayers, setLabelMode, setKit, setPending, setDots, setTrails, setView, resize, setHands, setPreview, project, setBall,
+    setPlayers, setLabelMode, setKit, setDetail, setPending, setDots, setTrails, setView, resize, setHands, setPreview, project, setBall, setScript,
     setWheelCapture: on => { wheelCapture = on; controls.enableZoom = !on; },
     toggleZones: on => { zoneGrid.visible = on ?? !zoneGrid.visible; return zoneGrid.visible; },
     dispose: () => { renderer.setAnimationLoop(null); renderer.dispose(); },
