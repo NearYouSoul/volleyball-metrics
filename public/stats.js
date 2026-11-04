@@ -380,7 +380,7 @@ function playersSection(v) {
     <div class="panel tw"><table class="t">
       <tr><th></th>${GROUPS.map(([g, n]) => `<th class="grp" colspan="${n}">${g}</th>`).join('')}</tr>
       <tr><th class="l">Игрок</th>${COLS.map(([k, t]) => `<th class="sort ${F.sort === k ? 'on' : ''} ${firstOf.has(k) ? 'b' : ''}" data-sort="${k}">${t}</th>`).join('')}</tr>
-      ${rows.map(([id, p]) => tr(v.nm(id), p)).join('')}
+      ${rows.map(([id, p]) => tr(`<a class="plink" href="player.html?p=${id}" title="Отчёт игрока">${v.nm(id)}</a>`, p)).join('')}
       ${tr('Команда', team, 'total')}
     </table></div>
     <div class="grid g2" style="margin-top:12px">

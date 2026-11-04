@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0a0b0d">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Отчёт игрока · Волей Метрика</title>
+  <link rel="stylesheet" href="studio/dash.css">
+</head>
+<body class="dash2 player-page">
+  <header class="dtop noprint">
+    <a class="brand" href="/"><img class="brandmark" src="img/logo.svg" alt=""><span class="bname"><b>Волей Метрика</b><small>Отчёт игрока</small></span></a>
+    <span class="grow"></span>
+    <a class="btn-chip" href="stats.html">Аналитика</a>
+    <button class="btn-chip" onclick="print()" title="Сохранить в PDF или распечатать — чтобы отправить игроку">⎙ PDF / печать</button>
+  </header>
+  <div class="dfilters noprint" id="filters"></div>
+  <main class="dmain" id="app"><p class="muted" style="padding:40px">Загрузка…</p></main>
+  <div class="tip" id="tip"></div>
+  <script type="module" src="player.js"></script>
+</body>
+</html>

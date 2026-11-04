@@ -998,7 +998,7 @@ function sideStat() {
     ${run >= 3 && st.set && !st.set.over ? `<div class="banner ${flow.at(-1) === 'us' ? 'ok' : 'bad'}" style="margin-top:8px">Серия ${run}:0 ${flow.at(-1) === 'us' ? 'наша' : 'соперника'}${flow.at(-1) === 'them' ? ' — может, тайм-аут?' : ''}</div>` : ''}
     <h3>Игроки</h3>
     <table class="stbl"><tr><th class="l">Игрок</th><th title="Очки">Оч</th><th title="Плюс / минус">±</th><th title="Атака: очки / всего">Атака</th><th title="Приём: средняя оценка 0–3">Пр</th><th title="Подача: эйсы / ошибки">Под</th><th title="Блок: очки">Бл</th></tr>
-      ${rows.map(({ id, p, tt }) => `<tr><td class="l">${esc(name(id))}</td><td><b>${tt.points}</b></td><td class="${tt.diff > 0 ? 'pos' : tt.diff < 0 ? 'neg' : ''}">${tt.diff > 0 ? '+' : ''}${tt.diff}</td>
+      ${rows.map(({ id, p, tt }) => `<tr><td class="l"><a href="player.html?p=${id}" target="_blank" style="color:inherit" title="Отчёт игрока">${esc(name(id))}</a></td><td><b>${tt.points}</b></td><td class="${tt.diff > 0 ? 'pos' : tt.diff < 0 ? 'neg' : ''}">${tt.diff > 0 ? '+' : ''}${tt.diff}</td>
         <td>${p.att.tot ? `${p.att.kill + p.att.bo}/${p.att.tot}` : '·'}</td><td>${p.rec.tot ? recRating(p.rec).toFixed(1) : '·'}</td><td>${p.serve.ace || p.serve.err ? `${p.serve.ace}/${p.serve.err}` : '·'}</td><td>${p.blk.point || '·'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Касаний пока нет</td></tr>'}
     </table>
     <h3>Сайд-аут по расстановкам</h3>
@@ -2441,7 +2441,12 @@ call(async () => {
   await loadAll();
   const id = location.hash.match(/m=([a-z0-9]+)/)?.[1] ?? store.get('lastMatch', null) ?? ui.matches[0]?.id;
   pollVideos();
-  if (id && ui.matches.some(m => m.id === id)) await openMatch(id);
+  if (id && ui.matches.some(m => m.id === id)) {
+    await openMatch(id);
+    // Ссылка на конкретный розыгрыш (из отчёта игрока): #m=…&r=партия:розыгрыш.
+    const rk = location.hash.match(/r=(\d+:\d+)/)?.[1];
+    if (rk) setTimeout(() => { ui.tab = 'events'; ui.evView = 'rallies'; pickRally(rk); }, 300);
+  }
   else ui.tab = 'match';
 });
 // Дашборд и телефон могут менять данные — подтягиваем список матчей, когда окно снова в фокусе.
