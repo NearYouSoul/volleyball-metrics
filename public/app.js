@@ -231,6 +231,7 @@ function viewLive() {
       <button data-a="pt" data-side="them">+1 им</button>
       <button data-a="home">Меню</button>
     </div>
+    <div class="row"><button data-a="timeout" data-side="us">⏸ Тайм-аут наш</button><button data-a="timeout" data-side="them">⏸ Тайм-аут их</button></div>
     <p class="hint">⇄ на плашке фазы — поменять сторону мяча, если программа ошиблась. «+1» — очко без статистики.</p>
     <div class="log">${log.slice(-5, -1).reverse().map(l => `<div class="${l.side || ''}">${esc(l.text)}</div>`).join('')}</div>
     ${set.over ? viewSetOver() : ''}`;
@@ -371,6 +372,7 @@ const handlers = {
   flip: () => sendEvent({ t: 'act', skill: 'team', res: PHASES[ui.st.rally.phase].flip, p: null }),
   act: d => sendEvent({ t: 'act', skill: d.skill, res: d.res, p: d.p || null }),
   pt: d => sendEvent({ t: 'pt', side: d.side }),
+  timeout: d => sendEvent({ t: 'timeout', side: d.side }),
   undo: () => undo(),
   sub: () => { ui.sub = ui.sub ? null : { out: null }; ui.sel = null; render(); },
   subOut: d => { ui.sub.out = d.id; render(); },

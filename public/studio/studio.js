@@ -772,7 +772,7 @@ function paintBar() {
   if (['touch2', 'rec', 'their', 'free'].includes(st)) parts.push(btn('ballDown', st === 'rec' && !ui.draft?.touch ? 'Эйс соперника' : 'Мяч упал', 'r', '', 'X'));
   if (st === 'att') parts.push(btn('netErr', 'Сетка', 'r', '', 'N'));
   if (st === 'their') parts.push(btn('act', 'Ошибка соперника', 'g', 'data-skill="team" data-res="oppError"', '+'), ...(c.block ? [btn('blockOff', 'Без блока')] : []));
-  parts.push('<span class="grow"></span>', btn('pt', '+1', 'g opt', 'data-side="us" title="Очко нам без статистики"'), btn('pt', '+1', 'r opt', 'data-side="them" title="Очко им без статистики"'), btn('flip', icon('i-swap'), 'opt', 'title="Мяч на другой стороне (если программа ошиблась)"'));
+  parts.push('<span class="grow"></span>', btn('timeout', '⏸ Т-аут', 'opt', 'data-side="us" title="Тайм-аут наш (метка на видео и в анализе)"'), btn('timeout', '⏸ их', 'opt', 'data-side="them" title="Тайм-аут соперника"'), btn('pt', '+1', 'g opt', 'data-side="us" title="Очко нам без статистики"'), btn('pt', '+1', 'r opt', 'data-side="them" title="Очко им без статистики"'), btn('flip', icon('i-swap'), 'opt', 'title="Мяч на другой стороне (если программа ошиблась)"'));
   el.innerHTML = parts.join('');
 }
 
@@ -1093,7 +1093,7 @@ function paintTimeline() {
     const ev = ui.match.events[l.i];
     if (ev.v !== ui.activeVideo || ev.vt == null) continue;
     if (ev.t === 'set') { bySet[l.i] = ev.vt; continue; }
-    out.push(`<i class="mk ${l.side || ''} ${ui.edit === l.i ? 'sel' : ''}" style="left:${(100 * ev.vt) / d}%" title="${fmt(ev.vt)} · ${esc(l.text)}" data-i="${l.i}"></i>`);
+    out.push(`<i class="mk ${l.side || ''} ${l.timeout ? 'to' : ''} ${ui.edit === l.i ? 'sel' : ''}" style="left:${(100 * ev.vt) / d}%" title="${fmt(ev.vt)} · ${esc(l.text)}" data-i="${l.i}"></i>`);
   }
   const bands = Object.values(bySet).sort((a, b) => a - b).map((t, k, arr) =>
     `<div class="set-band" style="left:${(100 * t) / d}%;width:${(100 * ((arr[k + 1] ?? d) - t)) / d}%"><span>П${k + 1}</span></div>`).join('');
@@ -1665,7 +1665,12 @@ const filteredRallies = () => rallies().filter(r => ({ all: true, star: r.star, 
 function sideRallies() {
   const list = filteredRallies();
   let html = '', set = -1;
+  // Тайм-ауты — строками между розыгрышами (по месту в списке событий).
+  const tos = ui.full.log.filter(l => l.timeout).map(l => ({ i: l.i, side: l.timeout, text: l.text, vt: ui.match.events[l.i]?.vt }));
+  let ti = 0;
+  const flushTo = upto => { let h = ''; while (ti < tos.length && tos[ti].i < upto) { const t = tos[ti++]; h += `<div class="tol" data-a="pickEv" data-i="${t.i}"><span>${t.vt != null ? fmtShort(t.vt) : ''}</span>⏸ ${esc(t.text)}</div>`; } return h; };
   for (const r of list) {
+    html += (ui.rFilter ?? 'all') === 'all' ? flushTo(r.plays[0].i) : '';
     if (r.set !== set) { set = r.set; html += `<div class="ev-div">Партия ${set + 1}</div>`; }
     const cls = `rl ${r.won === true ? 'us' : r.won === false ? 'them' : 'open'} ${ui.focusRally === r.key ? 'sel' : ''}`;
     html += `<div class="${cls}" data-a="pickRally" data-k="${r.key}">
@@ -2038,6 +2043,7 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  timeout: d => { if (!live()) return; sendRaw({ t: 'timeout', side: d.side }); toast(`Тайм-аут ${d.side === 'us' ? 'наш' : 'соперника'} отмечен`); },
   statScope: d => { ui.statScope = d.v === 'all' ? 'all' : +d.v; paintSide(); },
   teamModal: () => openTeamModal(),
   embDel: d => { if (d.who === 'us') ui.team.emblem = null; else delete ui.team.opponents[+d.who].emblem; paintTeamModal(); },

@@ -155,3 +155,16 @@ test('форматы матча: до 3 побед, одиночная парт�
   const manual = replay({ roster, events: [{ t: 'set', lineup, weServe: true, target: 15 }, ...pts('us', 15)] });
   assert.equal(manual.sets[0].over, true);
 });
+
+test('тайм-ауты и плюс-минус на площадке', async () => {
+  const { timeoutEffect } = await import('../public/engine.js');
+  const st = run([
+    { t: 'set', lineup, weServe: true }, { t: 'pt', side: 'them' }, { t: 'pt', side: 'them' },
+    { t: 'timeout', side: 'us' }, { t: 'pt', side: 'us' }, { t: 'pt', side: 'us' },
+  ]);
+  assert.deepEqual(st.sets[0].timeouts[0], { side: 'us', i: 3, at: 2, score: [0, 2] });
+  const ef = timeoutEffect(st.sets);
+  assert.deepEqual([ef.count, ef.firstWon, ef.runs, ef.brokeRun, ef.nextWon], [1, 1, 1, 1, 2]);
+  assert.deepEqual(st.players.all.a.court, { n: 4, us: 2 });
+  assert.equal(st.players.all.g, undefined); // запасной не выходил
+});

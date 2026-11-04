@@ -56,6 +56,7 @@ export const newPlayer = () => ({
   blk: { point: 0, touch: 0, out: 0 },
   dig: { tot: 0, plus: 0, minus: 0, over: 0, err: 0 },
   fault: 0,
+  court: { n: 0, us: 0 }, // розыгрышей на площадке и сколько из них выиграли — для «±, пока игрок на площадке»
 });
 
 const newTeam = () => ({
@@ -143,6 +144,8 @@ export function replay(match, opts = {}) {
   const zoneOfPlayer = id => { const k = set.lineup.indexOf(id); return k >= 0 ? rally.zones[k] : null; };
 
   const endRally = (winner, withStats) => {
+    // Плюс-минус на площадке: каждый из шестерых получает розыгрыш (и победу, если выиграли).
+    for (const id of set.lineup) eachPlayer(id, p => { p.court.n++; if (winner === 'us') p.court.us++; });
     // Подача в игру считается сама: каждый наш розыгрыш на своей подаче — это подача.
     if (withStats && rally.weServe) {
       eachPlayer(rally.server, p => {
@@ -283,6 +286,12 @@ export function replay(match, opts = {}) {
       log.push({ i, text: `Замена: ${playerName(match, ev.in)} вместо ${playerName(match, ev.out)}` });
       return;
     }
+    // Тайм-аут: метка в партии (счёт и номер розыгрыша) — для анализа «до и после тайм-аута».
+    if (ev.t === 'timeout') {
+      (set.timeouts ??= []).push({ side: ev.side, i, at: set.flow.length, score: [set.us, set.them] });
+      log.push({ i, text: `Тайм-аут ${ev.side === 'us' ? 'наш' : 'соперника'} · ${score()}`, timeout: ev.side });
+      return;
+    }
     if (ev.t === 'pt') {
       endRally(ev.side, false);
       log.push({ i, side: ev.side, text: `Очко ${ev.side === 'us' ? 'нам' : 'им'} (без статистики) · ${score()}` });
@@ -334,3 +343,19 @@ export function addStats(target, src) {
 export const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '–');
 
 export { zoneOf };
+
+// Тайм-ауты: сколько розыгрышей выиграли сразу после (следующие n) и прервали ли серию соперника.
+export function timeoutEffect(sets, side = 'us', n = 3) {
+  const out = { count: 0, nextWon: 0, nextTot: 0, firstWon: 0, brokeRun: 0, runs: 0 };
+  for (const s of sets) for (const t of s.timeouts ?? []) {
+    if (t.side !== side) continue;
+    out.count++;
+    const next = s.flow.slice(t.at, t.at + n);
+    out.nextTot += next.length; out.nextWon += next.filter(w => w === 'us').length;
+    if (next[0] === 'us') out.firstWon++;
+    // Серия соперника перед тайм-аутом (2+ подряд) — прервали ли её первым же розыгрышем.
+    let run = 0; for (let k = t.at - 1; k >= 0 && s.flow[k] === 'them'; k--) run++;
+    if (run >= 2) { out.runs++; if (next[0] === 'us') out.brokeRun++; }
+  }
+  return out;
+}

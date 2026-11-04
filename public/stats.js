@@ -1,6 +1,6 @@
 // Дашборд детальной статистики: обзор, ход партии, тепловые карты, отчёт связующего,
 // расстановки, игроки. Всё считается из «розыгрыша по касаниям» (plays) движка — с фильтрами.
-import { replay, totals, newPlayer, playerName, addStats, ACTIONS, LABELS, REC_RATING, attEff, recRating, SKILLS } from './engine.js';
+import { replay, totals, newPlayer, playerName, addStats, ACTIONS, LABELS, REC_RATING, attEff, recRating, SKILLS, timeoutEffect } from './engine.js';
 import { slotZones, zoneOfSlot, SYSTEMS, zoneOf, TEMPOS, NET } from './court.js';
 import { courtBase, heat, svgWrap, sx, sy } from './studio/court2d.js';
 
@@ -154,13 +154,24 @@ function flow(v) {
         <line class="ax" x1="${pad.l}" x2="${W - pad.r}" y1="${Y(0)}" y2="${Y(0)}"/><text x="${pad.l - 6}" y="${Y(0) + 4}" text-anchor="end">0</text>
         <path d="${area}" fill="rgb(89 212 153 / .18)" clip-path="url(#${id}a)"/><path d="${area}" fill="rgb(255 99 99 / .18)" clip-path="url(#${id}b)"/>
         <path class="ln" d="${path}"/>
+        ${(s.timeouts ?? []).map(t => `<line x1="${X(t.at)}" x2="${X(t.at)}" y1="${pad.t}" y2="${H - pad.b}" stroke="${t.side === 'us' ? '#f0c85a' : '#a0a3aa'}" stroke-dasharray="3 3"/><text x="${X(t.at) + 3}" y="${pad.t + 9}" style="fill:${t.side === 'us' ? '#f0c85a' : 'var(--smoke)'}">ТА ${t.side === 'us' ? 'наш' : 'их'}</text>`).join('')}
         ${runLbl}
         <text x="${pad.l}" y="${H - 4}">1</text><text x="${W - pad.r}" y="${H - 4}" text-anchor="end">${pts.length - 1} розыгр.</text>
         ${hits}
       </svg></div>`;
   });
-  return `<section class="dsec" id="flow"><h2>Ход партии</h2><p class="sub">Разница в счёте после каждого розыгрыша. Наведите на график — увидите счёт.</p>
-    <div class="grid g2">${charts.join('') || '<div class="empty">Партий ещё нет</div>'}</div></section>`;
+  return `<section class="dsec" id="flow"><h2>Ход партии</h2><p class="sub">Разница в счёте после каждого розыгрыша. Наведите на график — увидите счёт. Пунктир — тайм-ауты.</p>
+    <div class="grid g2">${charts.join('') || '<div class="empty">Партий ещё нет</div>'}</div>${timeoutsBlock(v)}</section>`;
+}
+
+// Тайм-ауты: что было сразу после (по всем выбранным матчам).
+function timeoutsBlock(v) {
+  const sets = v.rows.flatMap(r => r.st.sets.filter(s => v.scope === 'all' || s.n === v.scope));
+  const us = timeoutEffect(sets, 'us'), them = timeoutEffect(sets, 'them');
+  if (!us.count && !them.count) return '';
+  const card = (title, e, who) => `<div class="kpi"><div class="t">${title}</div><div class="v">${e.count}</div>
+    <div class="s">${e.count ? `первый розыгрыш после — наш в ${pc(e.firstWon, e.count)} · следующие 3: ${pc(e.nextWon, e.nextTot)}${who === 'us' && e.runs ? ` · серию соперника прервали ${e.brokeRun} из ${e.runs}` : ''}` : 'не брали'}</div></div>`;
+  return `<div class="kpis" style="margin-top:12px">${card('Наши тайм-ауты', us, 'us')}${card('Тайм-ауты соперника', them, 'them')}</div>`;
 }
 
 // ---------- Тепловые карты ----------
@@ -339,20 +350,20 @@ function rotSection(v) {
 
 // ---------- Игроки ----------
 const COLS = [
-  ['points', 'Очки', p => totals(p).points], ['diff', '+/−', p => totals(p).diff],
+  ['points', 'Очки', p => totals(p).points], ['diff', '+/−', p => totals(p).diff], ['court', '± на площ.', p => (p.court?.n ? 2 * p.court.us - p.court.n : null)],
   ['srv', 'Подач', p => p.serve.tot], ['ace', 'Эйс', p => p.serve.ace], ['serr', 'Ош', p => p.serve.err],
   ['rec', 'Приём', p => p.rec.tot], ['rr', 'Рейтинг', p => recRating(p.rec)], ['rpos', 'Позитив', p => (p.rec.tot ? (p.rec.pp + p.rec.pm) / p.rec.tot : null)], ['rerr', 'Ош', p => p.rec.err],
   ['att', 'Атак', p => p.att.tot], ['kill', 'Очки', p => p.att.kill + p.att.bo], ['aplay', 'В игре', p => p.att.tot - p.att.kill - p.att.bo - p.att.err - p.att.blk], ['aerr', 'Ош+Бл', p => p.att.err + p.att.blk], ['kp', 'Реализ.', p => (p.att.tot ? (p.att.kill + p.att.bo) / p.att.tot : null)], ['eff', 'Эфф', p => attEff(p.att)],
   ['set', 'Пасов', p => p.set.tot], ['setq', 'Хорош.', p => (p.set.tot ? (p.set.perfect + p.set.good) / p.set.tot : null)],
   ['blk', 'Блок', p => p.blk.point], ['dig', 'Защита', p => p.dig.tot], ['dplus', 'Подн.', p => (p.dig.tot ? (p.dig.plus + p.dig.minus) / p.dig.tot : null)],
 ];
-const GROUPS = [['Итог', 2], ['Подача', 3], ['Приём', 4], ['Атака', 6], ['Пас', 2], ['Защита', 3]];
+const GROUPS = [['Итог', 3], ['Подача', 3], ['Приём', 4], ['Атака', 6], ['Пас', 2], ['Защита', 3]];
 const fmtCol = (k, v) => {
   if (v == null) return '–';
   if (k === 'rr') return v.toFixed(2);
   if (['rpos', 'kp', 'setq', 'dplus'].includes(k)) return Math.round(v * 100) + '%';
   if (k === 'eff') return `<span class="${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${sgn(Math.round(v * 100))}%</span>`;
-  if (k === 'diff') return `<span class="${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${sgn(v)}</span>`;
+  if (k === 'diff' || k === 'court') return `<span class="${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${sgn(v)}</span>`;
   return z(v);
 };
 function playersSection(v) {
@@ -365,7 +376,7 @@ function playersSection(v) {
   const team = Object.values(stats).reduce(addStats, newPlayer());
   const links = Object.values(teamAgg(v).links || {}).sort((a, b) => b.tot - a.tot).slice(0, 14);
   return `<section class="dsec" id="players"><h2>Игроки</h2>
-    <p class="sub">Нажмите на заголовок колонки — сортировка. Фильтры расстановки и фазы на таблицу не действуют (только матч и партия). Эффективность атаки = (очки − ошибки − блоки) / атаки.</p>
+    <p class="sub">Нажмите на заголовок колонки — сортировка. Фильтры расстановки и фазы на таблицу не действуют (только матч и партия). Эффективность атаки = (очки − ошибки − блоки) / атаки. «± на площ.» — сколько розыгрышей команда выиграла минус проиграла, пока игрок был на площадке.</p>
     <div class="panel tw"><table class="t">
       <tr><th></th>${GROUPS.map(([g, n]) => `<th class="grp" colspan="${n}">${g}</th>`).join('')}</tr>
       <tr><th class="l">Игрок</th>${COLS.map(([k, t]) => `<th class="sort ${F.sort === k ? 'on' : ''} ${firstOf.has(k) ? 'b' : ''}" data-sort="${k}">${t}</th>`).join('')}</tr>
