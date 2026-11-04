@@ -180,7 +180,7 @@ export function replay(match, opts = {}) {
   const addPlay = (ev, i) => {
     const pl = {
       i, set: set.n, rally: rally.no, skill: ev.skill, res: ev.res, p: ev.p ?? null,
-      from: ev.from ?? null, to: ev.to ?? null, v: ev.v ?? null, vt: ev.vt ?? null,
+      from: ev.from ?? null, to: ev.to ?? null, v: ev.v ?? null, vt: ev.vt ?? null, opp: ev.opp ?? null, // opp — номер игрока соперника (скаутинг)
       rot: rally.rot, weServe: rally.weServe, score: [set.us, set.them], zone: zoneOfPlayer(ev.p), won: null,
     };
     if (ev.skill === 'serve' && !pl.p) pl.p = rally.server;

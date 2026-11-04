@@ -361,6 +361,7 @@ async function api(req, url) {
       if (Array.isArray(patch.videos)) match.videos = patch.videos;
       if (typeof patch.system === 'string') match.system = patch.system;
       if (typeof patch.preset === 'string') match.preset = patch.preset;
+      if (typeof patch.scout === 'boolean') match.scout = patch.scout; // скаутинг соперника в этом матче
       if (typeof patch.tournament === 'string') { if (patch.tournament) match.tournament = patch.tournament; else delete match.tournament; }
       // Роли на этот матч: { id игрока → роль }; пустая роль — как в команде.
       if (patch.roles && typeof patch.roles === 'object') match.roles = Object.fromEntries(Object.entries(patch.roles).filter(([, r]) => r));

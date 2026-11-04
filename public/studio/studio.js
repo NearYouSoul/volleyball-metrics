@@ -177,6 +177,7 @@ function sendAct(skill, res) {
   if (skill === 'set' && c?.stage === 'set') { ev.p = ui.sel ?? c.p; ev.from = c.from; }
   if (skill === 'att' && c?.stage === 'att') { ev.p = ui.sel ?? c.p; ev.from = c.from; }
   if (skill === 'set') { ev.tempo = tempoOfH(curH()); ev.h = curH(); }
+  scoutTag(ev);
   ui.sel = null; ui.group = null; ui.setH = null; ui.draft = null;
   postEvent(ev);
 }
@@ -366,7 +367,18 @@ function ctx() {
 const touchNo = c => ({ rec: 1, their: 1, free: 1, touch2: 2, set: 3, att: 3, await: c?.kind === 'touch' ? 1 : c?.kind === 'setter' ? 2 : 3 })[c?.stage] ?? 0;
 const baseStage = c => (c?.stage === 'await' ? c.base : c?.stage);
 
+// Скаутинг: номер соперника к событию — подающий (приём, эйс, ошибка их подачи) или бьющий (защита, блок, их очко).
+function scoutTag(ev) {
+  if (!ui.match?.scout) return ev;
+  const st = baseStage(ctx());
+  const serve = ev.skill === 'rec' || (ev.skill === 'team' && (ev.res === 'oppAce' || (ev.res === 'oppError' && st === 'rec')));
+  const attack = ev.skill === 'dig' || ev.skill === 'blk' || (ev.skill === 'team' && (ev.res === 'oppKill' || ev.res === 'oppError') && !serve);
+  if (serve && ui.scoutSrv) ev.opp = ui.scoutSrv;
+  if (attack && ui.scoutAtt) { ev.opp = ui.scoutAtt; ui.scoutAtt = null; } // бьющий — на один удар
+  return ev;
+}
 function postAct(ev) {
+  scoutTag(ev);
   if (ev.p && ACT_OF[ev.skill] && ev.skill !== 'rec' && ev.skill !== 'dig' && ev.skill !== 'set') doAct(ev.p, ACT_OF[ev.skill]);
   postEvent(stamp({ t: 'act', ...ev }));
 }
@@ -769,6 +781,14 @@ function paintBar() {
       `<span class="hv">${curH().toFixed(1)}м</span>`, '<span class="sep"></span>',
       ...[['perfect', 'Идеал', 'Q'], ['good', 'Хорош', 'W'], ['poor', 'Неудоб', 'E']].map(([k, v, kb]) => btn('setQ', v, q === k ? 'on' : '', `data-v="${k}" title="Качество паса"`, kb)));
   }
+  // Скаутинг: номер подающего / бьющего соперника — чипами (подающий запоминается, бьющий — на один удар).
+  if (ui.match.scout && (st === 'rec' || st === 'their' || (st === 'touch2' && !c.touch?.from && c.touch?.kind === 'dig'))) {
+    const nums = oppOf(ui.match)?.numbers ?? [];
+    const cur = st === 'rec' ? ui.scoutSrv : ui.scoutAtt;
+    parts.push('<span class="sep"></span>', `<span class="sl">${st === 'rec' ? 'Подаёт' : 'Бьёт'} №</span>`,
+      ...nums.map(n => btn('scoutNum', esc(n), cur === n ? 'on' : '', `data-v="${esc(n)}" data-w="${st === 'rec' ? 'srv' : 'att'}"`)),
+      btn('scoutAdd', '+', '', `data-w="${st === 'rec' ? 'srv' : 'att'}" title="Добавить номер игрока соперника"`), '<span class="sep"></span>');
+  }
   if (['touch2', 'rec', 'their', 'free'].includes(st)) parts.push(btn('ballDown', st === 'rec' && !ui.draft?.touch ? 'Эйс соперника' : 'Мяч упал', 'r', '', 'X'));
   if (st === 'att') parts.push(btn('netErr', 'Сетка', 'r', '', 'N'));
   if (st === 'their') parts.push(btn('act', 'Ошибка соперника', 'g', 'data-skill="team" data-res="oppError"', '+'), ...(c.block ? [btn('blockOff', 'Без блока')] : []));
@@ -1070,6 +1090,7 @@ function sideMatch() {
         ${[...m.roster].sort((a, b) => (a.num || 99) - (b.num || 99)).map(p => { const team = ui.roster.find(r => r.id === p.id); const teamRole = roleOf(team ?? {}); return `<div class="mrole"><span>${esc(playerName(m, p.id))}</span>
           <select data-k="matchRole" data-id="${p.id}"><option value="">как в команде${ROLES[teamRole] ? ` (${ROLES[teamRole].short})` : ''}</option>${Object.entries(ROLES).map(([k, x]) => `<option value="${k}" ${m.roles?.[p.id] === k ? 'selected' : ''}>${x.name}</option>`).join('')}</select></div>`; }).join('')}
       </details>
+      <label class="toggle" style="margin-top:12px" title="В этом матче отмечать номер подающего и бьющего соперника — накопится отчёт по команде соперника"><input type="checkbox" data-k="matchScout" ${m.scout ? 'checked' : ''}><span>Скаутинг соперника (номера подающих и бьющих)</span></label>
       <label class="toggle" style="margin-top:12px"><input type="checkbox" data-k="trackSets" ${ui.trackSets ? 'checked' : ''}><span>Отмечать каждый пас (статистика связующего)</span></label>
       <div class="btns" style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
         ${!st.matchOver && (!st.set || st.set.over) ? `<button class="btn sm primary" data-a="lineup">Начать: ${setTitle(st.sets.length, st.format)}</button>` : ''}
@@ -2124,6 +2145,16 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  scoutNum: d => { const k = d.w === 'srv' ? 'scoutSrv' : 'scoutAtt'; ui[k] = ui[k] === d.v ? null : d.v; paintBar(); },
+  scoutAdd: d => {
+    const n = prompt('Номер игрока соперника:')?.trim();
+    if (!n) return;
+    const o = oppOf(ui.match);
+    if (!o) return;
+    const numbers = [...new Set([...(o.numbers ?? []), n])].sort((a, b) => (+a || 99) - (+b || 99));
+    ui[d.w === 'srv' ? 'scoutSrv' : 'scoutAtt'] = n;
+    call(async () => { ui.settings = await api('PUT', '/api/settings', { opponents: ui.settings.opponents.map(x => (x.id === o.id ? { ...x, numbers } : x)) }); });
+  },
   tourGo: d => startTour(+d.k),
   tourEnd: () => endTour(),
   tourStart: () => startTour(0),
@@ -2428,6 +2459,7 @@ document.addEventListener('change', e => {
     f.rot = zoneOf[v]; // та же картина на площадке — теперь это Р по зоне нового связующего
     paintFormEditor();
   }
+  if (k === 'matchScout') call(async () => { setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { scout: v })); toast(v ? 'Скаутинг включён: под площадкой — номера подающего и бьющего соперника' : 'Скаутинг выключен'); });
   if (k === 'matchTour') call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { tournament: v })));
   if (k === 'matchFormat') { const format = pickFormat(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { format }))); }
   if (k === 'matchPreset') { const pr = presetById(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { preset: v, system: pr.system || ui.match.system }))); }

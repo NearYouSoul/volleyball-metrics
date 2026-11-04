@@ -441,6 +441,62 @@ function toursSection(v) {
     <div class="panel tw" style="margin-top:12px"><table class="t"><tr><th class="l">Турнир</th><th>Матчей</th><th>Победы:поражения</th><th>Сайд-аут</th><th>Брейк</th><th>Атака</th><th>Приём</th></tr>${rows}</table></div></section>`;
 }
 
+// ---------- Скаутинг соперника ----------
+// Их атаки — это наши защиты/блоки и «соперник забил / ошибся» вне приёма; их подачи — наш приём и эйсы/ошибки на подаче.
+// Номер бьющего/подающего (p.opp) есть, только если в матче включён скаутинг.
+const isTheirServe = p => p.skill === 'rec' || (p.skill === 'team' && (p.res === 'oppAce' || (p.res === 'oppError' && !p.weServe && p.rallyFirst)));
+const isTheirAttack = p => !isTheirServe(p) && (p.skill === 'dig' || p.skill === 'blk' || (p.skill === 'team' && (p.res === 'oppKill' || p.res === 'oppError')));
+// Линия / диагональ — по смещению удара поперёк площадки.
+const lineOrDiag = p => (p.from && p.to ? (Math.abs(p.to.x - p.from.x) < 2.5 ? 'line' : 'diag') : null);
+const theirZone = p => (p.from && p.from.y > NET ? (zoneOf(p.from) <= 4 && zoneOf(p.from) >= 2 ? String(zoneOf(p.from)) : 'back') : null);
+// Исход их атаки: очко им / очко нам / мяч в игре.
+const attOut = p => (p.skill === 'team' ? (p.res === 'oppKill' ? 'them' : 'us') : p.skill === 'blk' ? (p.res === 'point' ? 'us' : p.res === 'error' ? 'them' : null) : p.res === 'error' ? 'them' : null);
+
+function scoutSection(v) {
+  const on = v.rows.some(({ m }) => m.scout) || v.plays.some(p => p.opp);
+  if (!on) return '';
+  // Первое действие розыгрыша нужно, чтобы отличить ошибку подачи соперника от ошибки атаки.
+  const first = new Set();
+  const plays = v.plays.map(p => { const k = `${p.mid}:${p.set}:${p.rally}`; const f = !first.has(k); first.add(k); return { ...p, rallyFirst: f }; });
+  const att = plays.filter(isTheirAttack), srv = plays.filter(isTheirServe);
+  const OUTC = { them: OUT_COLOR.them, us: OUT_COLOR.us, null: OUT_COLOR.null };
+  // Площадка целиком: откуда (их половина) → куда (наша).
+  const drawn = att.filter(p => p.to);
+  let inner = courtBase('full').svg;
+  inner += drawn.map(p => (p.from ? `<line class="traj" x1="${sx(p.from)}" y1="${sy(p.from)}" x2="${sx(p.to)}" y2="${sy(p.to)}" stroke="${OUTC[attOut(p)]}"/>` : '')).join('');
+  inner += drawn.map(p => `<circle class="dot" cx="${sx(p.to)}" cy="${sy(p.to)}" r=".2" fill="${OUTC[attOut(p)]}" data-tip="${p.opp ? `<b>№${esc(p.opp)}</b><br>` : ''}${esc(LABELS[p.skill][p.res])}${lineOrDiag(p) ? ` · ${lineOrDiag(p) === 'line' ? 'по линии' : 'по диагонали'}` : ''}<br>партия ${p.set + 1} · ${p.score[0]}:${p.score[1]}"/>`).join('');
+  // По зонам, откуда бьют.
+  const zrow = (key, title) => {
+    const a = att.filter(p => (key === 'all' ? true : theirZone(p) === key));
+    if (!a.length) return '';
+    const k = a.filter(p => attOut(p) === 'them').length, ld = a.map(lineOrDiag), l = ld.filter(x => x === 'line').length, d = ld.filter(x => x === 'diag').length;
+    return `<tr${key === 'all' ? ' class="total"' : ''}><td class="l">${title}</td><td>${a.length}</td><td class="neg">${pc(k, a.length)}</td><td>${l + d ? pc(l, l + d) : '–'}</td><td>${l + d ? pc(d, l + d) : '–'}</td></tr>`;
+  };
+  const zones = [['4', 'Зона 4 (их левый край)'], ['3', 'Зона 3 (центр)'], ['2', 'Зона 2 (их правый край)'], ['back', 'Задняя линия']].map(([k, t]) => zrow(k, t)).join('') + zrow('all', 'Всего');
+  // По игрокам (номерам).
+  const nums = [...new Set(plays.filter(p => p.opp).map(p => String(p.opp)))].sort((a, b) => a - b);
+  const prow = n => {
+    const a = att.filter(p => String(p.opp) === n), s = srv.filter(p => String(p.opp) === n);
+    const k = a.filter(p => attOut(p) === 'them').length, ld = a.map(lineOrDiag), l = ld.filter(x => x === 'line').length, d = ld.filter(x => x === 'diag').length;
+    const zs = a.map(theirZone).filter(Boolean), zt = Object.entries(zs.reduce((o, z) => ((o[z] = (o[z] || 0) + 1), o), {})).sort((x, y) => y[1] - x[1])[0];
+    const rec = s.filter(p => p.skill === 'rec'), ace = s.filter(p => p.res === 'oppAce' || (p.skill === 'rec' && p.res === 'error')).length, se = s.filter(p => p.skill === 'team' && p.res === 'oppError').length;
+    const pos = rec.filter(p => p.res === 'pp' || p.res === 'pm').length, so = s.filter(p => p.won === true).length;
+    return `<tr><td class="l"><b>№${esc(n)}</b></td><td class="b">${a.length || '–'}</td><td class="neg">${pc(k, a.length)}</td><td>${zt ? (zt[0] === 'back' ? 'сзади' : 'зоны ' + zt[0]) : '–'}</td><td>${l + d ? `${pc(l, l + d)} / ${pc(d, l + d)}` : '–'}</td>
+      <td class="b">${s.length || '–'}</td><td class="neg">${ace || '–'}</td><td class="pos">${se || '–'}</td><td>${pc(pos, rec.length)}</td><td>${pc(so, s.length)}</td></tr>`;
+  };
+  const ptable = nums.length ? `<div class="panel tw" style="margin-top:12px"><h3>Игроки соперника <small>по номерам, которые отмечали в студии</small></h3><table class="t">
+    <tr><th></th><th class="grp" colspan="4">Атака</th><th class="grp" colspan="5">Подача</th></tr>
+    <tr><th class="l">Номер</th><th class="b">Ударов</th><th>Очков</th><th>Чаще из</th><th>Линия / диаг.</th><th class="b">Подач</th><th>Эйсов</th><th>Ошибок</th><th>Наш позитив</th><th>Наш сайд-аут</th></tr>
+    ${nums.map(prow).join('')}</table></div>` : '';
+  return `<section class="dsec" id="scout"><h2>Соперник</h2>
+    <p class="sub">Их атаки и подачи. Номера появляются, если в матче включён скаутинг и в студии отмечать «Подаёт № / Бьёт №». Линия или диагональ — по тому, откуда и куда пришёлся удар.</p>
+    <div class="grid g2">
+      <div class="panel"><h3>Их атаки: откуда → куда <small>${drawn.length}</small></h3>${drawn.length ? `<div style="max-width:340px;margin:0 auto">${svgWrap('full', inner)}</div>` : '<div class="empty">Нет точек: отмечайте, куда пришёлся их удар.</div>'}
+        <div class="legend"><span><i style="background:${OUT_COLOR.them}"></i>очко им</span><span><i style="background:${OUT_COLOR.null}"></i>подняли</span><span><i style="background:${OUT_COLOR.us}"></i>очко нам</span></div></div>
+      <div class="panel tw"><h3>Откуда бьют</h3>${att.length ? `<table class="t"><tr><th class="l">Зона</th><th>Ударов</th><th>Очков им</th><th>Линия</th><th>Диагональ</th></tr>${zones}</table>` : '<div class="muted">Атак соперника пока нет.</div>'}</div>
+    </div>${ptable}</section>`;
+}
+
 // ---------- Отрисовка ----------
 function render() {
   if (!DATA.matches.length) {
@@ -451,7 +507,7 @@ function render() {
   const v = view();
   document.getElementById('filters').innerHTML = filters(v);
   const y = scrollY;
-  $app.innerHTML = overview(v) + flow(v) + heatSection(v) + setterSection(v) + rotSection(v) + playersSection(v) + toursSection(v);
+  $app.innerHTML = overview(v) + flow(v) + heatSection(v) + setterSection(v) + rotSection(v) + playersSection(v) + scoutSection(v) + toursSection(v);
   scrollTo(0, y);
 }
 
