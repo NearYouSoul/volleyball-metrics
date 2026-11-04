@@ -544,3 +544,11 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .fcopy .grow { flex: 1; }
 .fcopy select { font-size: 12.5px; padding: 5px 7px; }
 .modal:has(#fsvg) { width: min(800px, calc(100vw - 32px)); }
+
+/* Состав команды */
+.trow.pl input.num { width: 56px; flex: none; }
+.trow.pl select { width: 150px; flex: none; font-size: 12.5px; }
+.trow.pl.off input, .trow.pl.off select { opacity: .5; }
+.mroles summary { cursor: pointer; font-size: 12.5px; color: var(--ash); }
+.mrole { display: grid; grid-template-columns: 1fr 150px; gap: 8px; align-items: center; padding: 3px 0; font-size: 12.5px; color: var(--ash); }
+.mrole select { font-size: 12px; padding: 4px 6px; }

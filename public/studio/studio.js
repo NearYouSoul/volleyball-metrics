@@ -1060,6 +1060,11 @@ function sideMatch() {
         <select data-k="system">${sys}</select>
         <span>Схема только подсказывает, кто пасует. В любом касании можно выбрать другого игрока — нестандартные перемещения не мешают.</span>
       </div>
+      <details class="mroles" style="margin-top:12px"><summary>Роли в этом матче${Object.keys(m.roles ?? {}).length ? ` · изменено: ${Object.keys(m.roles).length}` : ''}</summary>
+        <p class="muted" style="margin:6px 0">Если в этом матче игрок вынужденно играет другую роль (ЦБ — доигровщиком). На команду не влияет.</p>
+        ${[...m.roster].sort((a, b) => (a.num || 99) - (b.num || 99)).map(p => { const team = ui.roster.find(r => r.id === p.id); const teamRole = roleOf(team ?? {}); return `<div class="mrole"><span>${esc(playerName(m, p.id))}</span>
+          <select data-k="matchRole" data-id="${p.id}"><option value="">как в команде${ROLES[teamRole] ? ` (${ROLES[teamRole].short})` : ''}</option>${Object.entries(ROLES).map(([k, x]) => `<option value="${k}" ${m.roles?.[p.id] === k ? 'selected' : ''}>${x.name}</option>`).join('')}</select></div>`; }).join('')}
+      </details>
       <label class="toggle" style="margin-top:12px"><input type="checkbox" data-k="trackSets" ${ui.trackSets ? 'checked' : ''}><span>Отмечать каждый пас (статистика связующего)</span></label>
       <div class="btns" style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
         ${!st.matchOver && (!st.set || st.set.over) ? `<button class="btn sm primary" data-a="lineup">Начать: ${setTitle(st.sets.length, st.format)}</button>` : ''}
@@ -1073,9 +1078,8 @@ function sideMatch() {
     <h3>Зоны доводки</h3>
     <p class="muted">Оценка приёма и защиты ставится сама — по точке, куда мяч пришёл к пасующему. <button class="btn sm" data-a="zonesEditor" style="margin-top:8px">Настроить зоны ++ / +− / +</button></p>
     <h3>Команда</h3>
-    <div class="card teamcard">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>соперников: ${ui.settings.opponents.length}</small></span>
-      <button class="btn sm" data-a="teamModal">Название и эмблемы</button></div>
-    <p class="muted" style="margin-top:8px">Игроки и их роли — в <a href="detailed.html#settings" style="color:var(--sky)">настройках пульта</a>.</p>`;
+    <div class="card teamcard">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>в составе ${ui.roster.filter(p => p.active !== false).length} · в запасе ${ui.roster.filter(p => p.active === false).length} · соперников ${ui.settings.opponents.length}</small></span>
+      <button class="btn sm" data-a="teamModal">Игроки, соперники, эмблемы</button></div>`;
 }
 
 // ---------- Таймлайн ----------
@@ -1513,22 +1517,35 @@ function fileToEmblem(file) {
   });
 }
 function openTeamModal() {
-  ui.team = { teamName: ui.settings.teamName, emblem: ui.settings.emblem ?? null, opponents: JSON.parse(JSON.stringify(ui.settings.opponents)) };
+  ui.team = { teamName: ui.settings.teamName, emblem: ui.settings.emblem ?? null, opponents: JSON.parse(JSON.stringify(ui.settings.opponents)), roster: JSON.parse(JSON.stringify(ui.roster)), tab: 'players' };
   paintTeamModal();
 }
 function paintTeamModal() {
   const t = ui.team;
   const pick = (who) => `<label class="embpick" title="Загрузить эмблему">${emblem(who === 'us' ? t.emblem : t.opponents[who].emblem, who === 'us' ? t.teamName : t.opponents[who].name, 'lg')}
     <input type="file" accept="image/*" hidden data-k="embFile" data-who="${who}"></label>`;
-  modal(`<h2>Команда и соперники</h2><p>Эмблемы показываются в табло, списках матчей и аналитике. Кликните по кружку, чтобы загрузить картинку (PNG, JPG, SVG).</p>
+  const roleOpts = r => `<option value="">Роль</option>${Object.entries(ROLES).map(([k, x]) => `<option value="${k}" ${r === k ? 'selected' : ''}>${x.name}</option>`).join('')}`;
+  const players = [...t.roster].map((p, i) => ({ p, i })).sort((a, b) => (a.p.active === false) - (b.p.active === false) || (a.p.num || 99) - (b.p.num || 99));
+  const playersHtml = `<p class="muted" style="margin:0 0 8px">Пул игроков: «в составе» — попадают в новые матчи; «в запасе» — пока не играют (ушли, травма, другой турнир), их статистика в прошлых матчах сохраняется.</p>
+    <div class="tlist">${players.map(({ p, i }) => `<div class="trow pl ${p.active === false ? 'off' : ''}">
+      <input class="num" data-k="plNum" data-i="${i}" value="${esc(p.num ?? '')}" placeholder="№" inputmode="numeric">
+      <input data-k="plName" data-i="${i}" value="${esc(p.name)}" placeholder="Имя">
+      <select data-k="plRole" data-i="${i}">${roleOpts(roleOf(p))}</select>
+      <button class="btn sm ${p.active === false ? '' : 'ghost'}" data-a="plActive" data-i="${i}" title="В составе / в запасе">${p.active === false ? 'В запасе' : 'В составе'}</button>
+      <button class="rowdel" style="opacity:1" data-a="plDel" data-i="${i}" title="Удалить игрока">${icon('i-x')}</button></div>`).join('')}</div>
+    <button class="btn sm" data-a="plAdd" style="margin-top:8px">${icon('i-plus')}Игрок</button>`;
+  modal(`<h2>Команда</h2>
     <div class="trow us">${pick('us')}<input data-k="teamName" value="${esc(t.teamName)}" placeholder="Название команды">
       ${t.emblem ? '<button class="btn sm ghost" data-a="embDel" data-who="us">Убрать эмблему</button>' : ''}</div>
-    <h3 style="margin:18px 0 8px;font-size:12px;color:var(--smoke);text-transform:uppercase;letter-spacing:.06em">Соперники</h3>
+    <div class="seg" style="margin:14px 0 10px"><button class="${t.tab === 'players' ? 'on' : ''}" data-a="teamTab" data-v="players">Игроки</button><button class="${t.tab === 'opps' ? 'on' : ''}" data-a="teamTab" data-v="opps">Соперники и эмблемы</button></div>
+    ${t.tab === 'players' ? playersHtml + `<div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div>` : ''}
+    <div ${t.tab === 'players' ? 'hidden' : ''}>
+    <p class="muted" style="margin:0 0 8px">Эмблемы показываются в табло, списках матчей и аналитике. Кликните по кружку, чтобы загрузить картинку.</p>
     <div class="tlist">${t.opponents.map((o, i) => `<div class="trow">${pick(i)}<input data-k="oppName" data-i="${i}" value="${esc(o.name)}" placeholder="Название">
       ${o.emblem ? `<button class="btn sm ghost" data-a="embDel" data-who="${i}">Убрать</button>` : ''}
       <button class="rowdel" style="opacity:1" data-a="oppDel" data-i="${i}" title="Удалить соперника">${icon('i-x')}</button></div>`).join('') || '<p class="muted">Соперников пока нет.</p>'}</div>
     <button class="btn sm" data-a="oppAdd" style="margin-top:8px">${icon('i-plus')}Соперник</button>
-    <div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div>`);
+    <div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div></div>`);
 }
 
 // ---------- Видео ----------
@@ -2026,9 +2043,15 @@ const H = {
   embDel: d => { if (d.who === 'us') ui.team.emblem = null; else delete ui.team.opponents[+d.who].emblem; paintTeamModal(); },
   oppAdd: () => { ui.team.opponents.push({ id: newId(), name: '' }); paintTeamModal(); },
   oppDel: d => { const o = ui.team.opponents[+d.i]; if (o.name && !confirm(`Удалить соперника «${o.name}»? Его матчи останутся.`)) return; ui.team.opponents.splice(+d.i, 1); paintTeamModal(); },
+  teamTab: d => { ui.team.tab = d.v; paintTeamModal(); },
+  plAdd: () => { ui.team.roster.push({ id: newId(), num: '', name: '', role: '', setter: false }); paintTeamModal(); setTimeout(() => document.querySelector('.trow.pl:last-of-type input[data-k=plName]')?.focus(), 30); },
+  plActive: d => { const p = ui.team.roster[+d.i]; p.active = p.active === false ? true : false; paintTeamModal(); },
+  plDel: d => { const p = ui.team.roster[+d.i]; if (p.name && !confirm(`Удалить игрока «${p.name}» из команды? В прошлых матчах он останется. Если он просто не играет сейчас — лучше «В запасе».`)) return; ui.team.roster.splice(+d.i, 1); paintTeamModal(); },
   teamSave: () => call(async () => {
     const t = ui.team;
     const opponents = t.opponents.filter(o => o.name.trim()).map(o => ({ ...o, name: o.name.trim() }));
+    const roster = t.roster.filter(p => String(p.num).trim() || p.name.trim()).map(p => ({ ...p, num: p.num === '' ? '' : Number(p.num), name: p.name.trim(), role: roleOf(p), setter: roleOf(p) === 's' }));
+    ui.roster = await api('PUT', '/api/roster', roster);
     ui.settings = await api('PUT', '/api/settings', { teamName: t.teamName.trim() || 'Мы', emblem: t.emblem, opponents });
     ui.team = null; modal('');
     ui.matches = await api('GET', '/api/matches');
@@ -2240,6 +2263,11 @@ document.addEventListener('change', e => {
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (k === 'fskill') { ui.filter.skill = v; render(); }
   if (k === 'rFilter') { ui.rFilter = v; paintSide(); }
+  if (k === 'plRole' && ui.team) { const p = ui.team.roster[+e.target.dataset.i]; p.role = v; p.setter = v === 's'; }
+  if (k === 'matchRole') {
+    const roles = { ...(ui.match.roles ?? {}), [e.target.dataset.id]: v };
+    call(async () => { setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { roles })); toast(v ? 'Роль на этот матч изменена — статистика и расстановки пересчитаны' : 'Роль — как в команде'); });
+  }
   if (k === 'embFile' && e.target.files[0]) {
     const who = e.target.dataset.who;
     fileToEmblem(e.target.files[0]).then(src => { if (who === 'us') ui.team.emblem = src; else ui.team.opponents[+who].emblem = src; paintTeamModal(); }).catch(err => toast(err.message, true));
@@ -2279,6 +2307,8 @@ document.addEventListener('change', e => {
 document.addEventListener('input', e => {
   if (ui.team && e.target.dataset.k === 'teamName') ui.team.teamName = e.target.value;
   if (ui.team && e.target.dataset.k === 'oppName') ui.team.opponents[+e.target.dataset.i].name = e.target.value;
+  if (ui.team && e.target.dataset.k === 'plName') ui.team.roster[+e.target.dataset.i].name = e.target.value;
+  if (ui.team && e.target.dataset.k === 'plNum') ui.team.roster[+e.target.dataset.i].num = e.target.value;
   if (e.target.dataset.k === 'setH') {
     ui.setH = Number(e.target.value);
     e.target.previousElementSibling.querySelector('b').textContent = ui.setH.toFixed(1) + ' м';

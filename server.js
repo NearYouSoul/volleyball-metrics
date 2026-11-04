@@ -70,9 +70,14 @@ function hydrate(match, { roster, settings }) {
     const cur = roster.find(r => r.id === p.id);
     // Роль — тоже текущая (поправили роль в настройках — матчи видят новую). Отметку «связующий» обновляем,
     // только если у игрока задана роль; иначе оставляем, как была в матче.
-    return cur ? { ...p, num: cur.num, name: cur.name, ...(cur.role !== undefined && { role: cur.role, setter: cur.role === 's' }) } : p;
+    const base = cur ? { ...p, num: cur.num, name: cur.name, ...(cur.role !== undefined && { role: cur.role, setter: cur.role === 's' }) } : p;
+    // Роль на этот матч (ЦБ вынужден играть доигровщиком) — важнее роли в команде.
+    const own = match.roles?.[p.id];
+    return own ? { ...base, role: own, setter: own === 's' } : base;
   });
-  const added = roster.filter(r => !match.roster.some(p => p.id === r.id));
+  // Пришедшие в команду после начала матча — дописываем (только активных: ушедшие игроки в новые списки не попадают).
+  const added = roster.filter(r => r.active !== false && !match.roster.some(p => p.id === r.id))
+    .map(r => (match.roles?.[r.id] ? { ...r, role: match.roles[r.id], setter: match.roles[r.id] === 's' } : r));
   return { ...match, opponent: opp?.name ?? match.opponent, roster: [...snapshot, ...added] };
 }
 
@@ -168,7 +173,7 @@ async function api(req, url) {
       ...(fmt && { format: fmt }),
       opponent: refs.settings.opponents.find(o => o.id === opponentId)?.name || 'Соперник', // запасное имя, если соперника удалят
       created: new Date().toISOString(),
-      roster: refs.roster, // копия состава на момент матча
+      roster: refs.roster.filter(p => p.active !== false), // копия состава на момент матча — только активные игроки
       // Пресет команды (расстановки + схема) — активный в настройках; схема — из пресета.
       ...(() => { const pr = refs.settings.presets?.find(x => x.id === refs.settings.activePreset); return { system: pr?.system || refs.settings.system || '5-1', ...(pr && { preset: pr.id }) }; })(),
       videos: [],
@@ -266,6 +271,8 @@ async function api(req, url) {
       if (Array.isArray(patch.videos)) match.videos = patch.videos;
       if (typeof patch.system === 'string') match.system = patch.system;
       if (typeof patch.preset === 'string') match.preset = patch.preset;
+      // Роли на этот матч: { id игрока → роль }; пустая роль — как в команде.
+      if (patch.roles && typeof patch.roles === 'object') match.roles = Object.fromEntries(Object.entries(patch.roles).filter(([, r]) => r));
       if (patch.format && Number.isInteger(patch.format.sets)) match.format = { sets: patch.format.sets, points: +patch.format.points || 25, tiebreak: +patch.format.tiebreak || 15 };
       await writeJson(file, match);
       return hydrate(match, await loadRefs());
