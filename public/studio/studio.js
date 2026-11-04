@@ -4,6 +4,7 @@
 import { replay, playerName, LABELS, ACTIONS, SKILLS, totals, attEff, recRating, newPlayer, addStats, setTitle, setTarget, formatOptions, formatKey, pickFormat, formatName, formatOf } from '../engine.js';
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D, KIT_DEFAULT } from './court3d.js';
+import { initTips } from './tips.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
 import { SITUATIONS, spotFor, tableFor, defaultSpot, ATTACK, SETTER_SPOT, defenseLayout, blockSide, overlapIssues, attackByRole, frontByRole } from '../formations.js';
 
@@ -262,6 +263,8 @@ const LABEL_ICON = { num: '№', name: 'Аб', full: '№А', none: '–' };
 function paintLabelBtn() { const b = $('labelBtn'); if (b) b.querySelector('b').textContent = LABEL_ICON[store.get('labelMode', 'num')] ?? '№'; }
 court.setLabelMode(store.get('labelMode', 'num'));
 paintLabelBtn();
+// Режим подсказок: кнопка «?» в верхней панели (запоминается). Включён — подсказка у курсора через ~0,8 с.
+const tips = initTips({ get: () => store.get('tips', false), set: v => store.set('tips', v), button: $('tipsBtn') });
 // Детализация игроков: реалистичные или простые (запоминается).
 function paintDetailBtn() { const b = $('detailBtn'); if (b) { const real = store.get('detail', 'real') === 'real'; b.classList.toggle('on', real); b.querySelector('b').textContent = real ? 'HD' : 'Lo'; } }
 court.setDetail(store.get('detail', 'real'));
@@ -979,12 +982,12 @@ function paintDock() {
     <div class="tempo">${Object.entries(TEMPOS).map(([k, t]) => `<button class="${tempoOfH(curH()) === k ? 'on' : ''}" data-a="tempo" data-v="${k}" title="${t.label}">${{ q: '1 темп', f: '2 темп', h: '3 темп' }[k]}</button>`).join('')}</div>
     <div class="lbl">Высота дуги (колесо мыши) <b>${curH().toFixed(1)} м</b></div>
     <input type="range" min="2.6" max="9" step="0.1" value="${curH()}" data-k="setH">
-    <div class="muted" style="margin-top:6px;font-size:12px;color:var(--smoke)">Качество: Q идеальный · W хороший · E неудобный</div>` : '';
+    <div class="tip-inline">Качество: Q идеальный · W хороший · E неудобный</div>` : '';
   const teamActs = st.rally.phase === 'rec'
     ? `<button class="act r" data-a="act" data-skill="team" data-res="oppAce">Эйс соперника</button><button class="act g" data-a="act" data-skill="team" data-res="oppError">Ошибка соперника <span class="kbd">+</span></button>`
     : `<button class="act g" data-a="act" data-skill="team" data-res="oppError">Ошибка соперника <span class="kbd">+</span></button><button class="act r" data-a="act" data-skill="team" data-res="oppKill">Соперник забил <span class="kbd">−</span></button>`;
   const right = `<div class="ctx">
-    ${setCtl ? `<h4>Пас</h4>${setCtl}` : `<h4>Ввод на площадке</h4><div class="muted" style="font-size:12.5px;color:var(--smoke);line-height:1.5">Розыгрыш вводится кликами по 3D-площадке: приём → куда пришёл мяч к пасующему → откуда бьют → куда ударили. Кнопки слева — запасной вариант.</div>`}
+    ${setCtl ? `<h4>Пас</h4>${setCtl}` : `<h4>Ввод на площадке</h4><div class="tip-inline">Розыгрыш вводится кликами по 3D-площадке: приём → куда пришёл мяч к пасующему → откуда бьют → куда ударили. Кнопки слева — запасной вариант.</div>`}
     <h4 style="margin-top:14px">Соперник и розыгрыш</h4>
     <div class="team-acts">${teamActs}</div>
     <div class="tools-row">
@@ -1033,7 +1036,7 @@ function sideEvents() {
     return html + `<div class="filters"><select data-k="rFilter">${Object.entries(RFILTER).map(([k, v]) => `<option value="${k}" ${(ui.rFilter ?? 'all') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
       <div class="filters"><button class="btn sm" data-a="rallyClips" ${fr.length ? '' : 'disabled'} style="flex:1">${icon('i-clip')}Смотреть подряд (${fr.length})</button>
         <button class="btn sm" data-a="exportClips" ${fr.length ? '' : 'disabled'} title="Склеить эти розыгрыши в один видеофайл">⤓ Нарезка mp4</button></div>
-      <p class="muted" style="margin:4px 2px 8px">Клик — видео и 3D на этот розыгрыш · PgUp / PgDn — соседний · ☆ — в избранное</p><div class="evlist">${sideRallies()}</div>`;
+      <p class="tip-inline">Клик — видео и 3D на этот розыгрыш · PgUp / PgDn — соседний · ☆ — в избранное</p><div class="evlist">${sideRallies()}</div>`;
   }
   html += `<div class="filters">
     <select data-k="fskill"><option value="">Все навыки</option>${skills}</select>
@@ -1177,7 +1180,7 @@ function sideMatch() {
         <span>Схема только подсказывает, кто пасует. В любом касании можно выбрать другого игрока — нестандартные перемещения не мешают.</span>
       </div>
       <details class="mroles" style="margin-top:12px"><summary>Роли в этом матче${Object.keys(m.roles ?? {}).length ? ` · изменено: ${Object.keys(m.roles).length}` : ''}</summary>
-        <p class="muted" style="margin:6px 0">Если в этом матче игрок вынужденно играет другую роль (ЦБ — доигровщиком). На команду не влияет.</p>
+        <p class="tip-inline">Если в этом матче игрок вынужденно играет другую роль (ЦБ — доигровщиком). На команду не влияет.</p>
         ${[...m.roster].sort((a, b) => (a.num || 99) - (b.num || 99)).map(p => { const team = ui.roster.find(r => r.id === p.id); const teamRole = roleOf(team ?? {}); return `<div class="mrole"><span>${esc(playerName(m, p.id))}</span>
           <select data-k="matchRole" data-id="${p.id}"><option value="">как в команде${ROLES[teamRole] ? ` (${ROLES[teamRole].short})` : ''}</option>${Object.entries(ROLES).map(([k, x]) => `<option value="${k}" ${m.roles?.[p.id] === k ? 'selected' : ''}>${x.name}</option>`).join('')}</select></div>`; }).join('')}
       </details>
@@ -1191,9 +1194,9 @@ function sideMatch() {
     <h3>Матчи <span class="grow"></span><button class="btn sm" data-a="newMatch">${icon('i-plus')}Новый</button></h3>
     <div class="mlist">${list || '<p class="muted">Матчей пока нет.</p>'}</div>
     <h3>Расстановки команды</h3>
-    <p class="muted">Как команда стоит на приёме, на своей подаче и в защите — для каждой из Р1–Р6. <button class="btn sm" data-a="formEditor" style="margin-top:8px">Настроить расстановки</button></p>
+    <p class="muted"><span class="tip-inline">Как команда стоит на приёме, на своей подаче и в защите — для каждой из Р1–Р6.</span><button class="btn sm" data-a="formEditor">Настроить расстановки</button></p>
     <h3>Зоны доводки</h3>
-    <p class="muted">Оценка приёма и защиты ставится сама — по точке, куда мяч пришёл к пасующему. <button class="btn sm" data-a="zonesEditor" style="margin-top:8px">Настроить зоны ++ / + / −</button></p>
+    <p class="muted"><span class="tip-inline">Оценка приёма и защиты ставится сама — по точке, куда мяч пришёл к пасующему.</span><button class="btn sm" data-a="zonesEditor">Настроить зоны ++ / + / −</button></p>
     <h3>Команда</h3>
     <div class="card teamcard" style="margin-bottom:8px">${icon('i-list')}<span class="grow"><b>Данные и резервные копии</b><small>копия каждый день · корзина удалённых матчей</small></span>
       <button class="btn sm" data-a="dataModal">Открыть</button></div>
@@ -1304,7 +1307,7 @@ function paintLineup() {
   const pl = curPreset().lineup;
   const fromPreset = pl?.start?.length === 6 ? `<div class="field">Старт из пресета «${esc(curPreset().name)}» — нажмите расстановку, порядок подачи посчитается сам
       <div class="seg">${[1, 6, 5, 4, 3, 2].map(r => `<button class="${d.fromRot === r ? 'on' : ''}" data-a="lrot" data-v="${r}">Р${r}</button>`).join('')}</div></div>`
-    : `<p class="muted" style="margin-top:-6px">Совет: задайте состав пресета в редакторе расстановок — тогда партию можно начинать одной кнопкой Р1–Р6.</p>`;
+    : `<p class="tip-inline">Совет: задайте состав пресета в редакторе расстановок — тогда партию можно начинать одной кнопкой Р1–Р6.</p>`;
   const roster = [...ui.match.roster].sort((a, b) => a.num - b.num);
   const chosen = d.order.map(id => person(id));
   const setterOpts = chosen.map(p => `<option value="${p.id}" ${(d.setter ?? chosen.find(c => c.setter)?.id) === p.id ? 'selected' : ''}>${esc(playerName(ui.match, p.id))}${p.setter ? ' · связ.' : ''}</option>`).join('');
@@ -1491,7 +1494,7 @@ function rosterPanel(f) {
     return `<label class="rz"><span>зона ${z}${sl === ms ? ' · связующий' : ''}</span>
       <select data-k="fSlot" data-slot="${sl}">${roster.map(p => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>#${esc(p.num)} ${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</option>`).join('')}</select></label>`;
   };
-  return `<div class="rpanel"><p class="muted" style="margin:0 0 8px">Кто где стоит в <b>Р${f.rot}</b>. Задайте один раз — в остальных переходах игроки встанут по кругу.
+  return `<div class="rpanel"><p class="muted" style="margin:0 0 8px"><span class="tip-inline">Кто где стоит в Р${f.rot}. Задайте один раз — в остальных переходах игроки встанут по кругу.</span>
       Связующий (по нему считаются Р1–Р6): <select data-k="fMain">${lu.start.filter(Boolean).map(id => { const p = roster.find(x => x.id === id); return `<option value="${id}" ${id === lu.main ? 'selected' : ''}>#${esc(p?.num)} ${esc(p?.name)}</option>`; }).join('')}</select></p>
     <div class="rgrid">${[4, 3, 2, 5, 6, 1].map(cell).join('')}</div></div>`;
 }
@@ -1647,7 +1650,7 @@ function kitPreview(k) {
   return fig(k.main, 'игроки') + fig(k.setter, 'связующий') + fig(k.libero, 'либеро');
 }
 function kitHtml(k) {
-  return `<p class="muted" style="margin:0 0 10px">Цвета формы на 3D-площадке. Связующий — тот, кто пасует в этой расстановке; либеро — игрок с ролью «Либеро».</p>
+  return `<p class="tip-inline">Цвета формы на 3D-площадке. Связующий — тот, кто пасует в этой расстановке; либеро — игрок с ролью «Либеро».</p>
     <div class="kitwrap"><div class="kitlist">${KIT_FIELDS.map(([key, name]) => `<label class="kitrow"><input type="color" data-k="kitColor" data-key="${key}" value="${k[key]}"><span>${name}</span></label>`).join('')}
       <button class="btn sm ghost" data-a="kitReset" style="margin-top:6px;justify-self:start">Как было по умолчанию</button></div>
     <div class="kitprev">${kitPreview(k)}</div></div>`;
@@ -1662,7 +1665,7 @@ function paintTeamModal() {
     <input type="file" accept="image/*" hidden data-k="embFile" data-who="${who}"></label>`;
   const roleOpts = r => `<option value="">Роль</option>${Object.entries(ROLES).map(([k, x]) => `<option value="${k}" ${r === k ? 'selected' : ''}>${x.name}</option>`).join('')}`;
   const players = [...t.roster].map((p, i) => ({ p, i })).sort((a, b) => (a.p.active === false) - (b.p.active === false) || (a.p.num || 99) - (b.p.num || 99));
-  const playersHtml = `<p class="muted" style="margin:0 0 8px">Пул игроков: «в составе» — попадают в новые матчи; «в запасе» — пока не играют (ушли, травма, другой турнир), их статистика в прошлых матчах сохраняется.</p>
+  const playersHtml = `<p class="tip-inline">Пул игроков: «в составе» — попадают в новые матчи; «в запасе» — пока не играют (ушли, травма, другой турнир), их статистика в прошлых матчах сохраняется.</p>
     <div class="tlist">${players.map(({ p, i }) => `<div class="trow pl ${p.active === false ? 'off' : ''}">
       <input class="num" data-k="plNum" data-i="${i}" value="${esc(p.num ?? '')}" placeholder="№" inputmode="numeric">
       <input data-k="plName" data-i="${i}" value="${esc(p.name)}" placeholder="Имя">
@@ -1677,7 +1680,7 @@ function paintTeamModal() {
     ${t.tab === 'kit' ? kitHtml(t.kit) + `<div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div>` : ''}
     ${t.tab === 'players' ? playersHtml + `<div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div>` : ''}
     <div ${t.tab !== 'opps' ? 'hidden' : ''}>
-    <p class="muted" style="margin:0 0 8px">Эмблемы показываются в табло, списках матчей и аналитике. Кликните по кружку, чтобы загрузить картинку.</p>
+    <p class="tip-inline">Эмблемы показываются в табло, списках матчей и аналитике. Кликните по кружку, чтобы загрузить картинку.</p>
     <div class="tlist">${t.opponents.map((o, i) => `<div class="trow">${pick(i)}<input data-k="oppName" data-i="${i}" value="${esc(o.name)}" placeholder="Название">
       ${o.emblem ? `<button class="btn sm ghost" data-a="embDel" data-who="${i}">Убрать</button>` : ''}
       <button class="rowdel" style="opacity:1" data-a="oppDel" data-i="${i}" title="Удалить соперника">${icon('i-x')}</button></div>`).join('') || '<p class="muted">Соперников пока нет.</p>'}</div>
@@ -2257,6 +2260,7 @@ async function createMatch(opponentId) {
 const H = {
   tab: d => { ui.tab = d.tab; if (d.tab === 'video' && !ui.clips) api('GET', '/api/clips').then(c => { ui.clips = c; if (ui.tab === 'video') paintSide(); }).catch(() => {}); render(); },
   help: openHelp,
+  tips: () => toast(tips.toggle() ? 'Подсказки включены: задержите курсор на кнопке — появится пояснение' : 'Подсказки выключены'),
   modalClose: () => { modal(''); ui.fEdit = null; ui.team = null; },
   modalBg: (d, e) => { if (e.target.classList.contains('modal-bg')) modal(''); },
   pickFile: () => $('fileInput').click(),

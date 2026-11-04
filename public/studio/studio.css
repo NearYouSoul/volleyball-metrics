@@ -612,3 +612,11 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .kitfig svg { width: 60px; height: 70px; }
 .kitfig .kshorts { width: 34px; height: 14px; border-radius: 3px 3px 6px 6px; margin-top: -6px; }
 .kitfig small { color: var(--smoke); font-size: 11px; margin-top: 4px; }
+
+/* Режим подсказок: всплывающая подсказка у курсора; поясняющие абзацы в блоках скрыты всегда. */
+.tip-inline { display: none !important; }
+.tipbox { position: fixed; left: 0; top: 0; z-index: 9999; max-width: 320px; padding: 7px 10px; border-radius: 8px; background: rgb(24 25 30 / .97); color: var(--text); font-size: 12.5px; line-height: 1.45; white-space: pre-line; box-shadow: 0 0 0 1px rgb(255 255 255 / .1), 0 8px 24px rgb(0 0 0 / .45); pointer-events: none; opacity: 0; transition: opacity .12s; }
+.tipbox.on { opacity: 1; }
+.ibtn.tipsbtn b { font: 700 15px var(--font); }
+body.tips-on [data-tip] { cursor: help; }
+body.tips-on button[data-tip], body.tips-on a[data-tip], body.tips-on input[data-tip], body.tips-on select[data-tip], body.tips-on canvas[data-tip] { cursor: pointer; }
