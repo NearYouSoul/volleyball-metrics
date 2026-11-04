@@ -2,6 +2,7 @@
 // Всё состояние матча вычисляет engine.js из списка событий, который хранится на сервере.
 import { replay, playerName, LABELS, setTitle, formatOptions, formatKey, pickFormat } from './engine.js';
 import { SYSTEMS, ROLES, roleOf } from './court.js';
+import { createSync, statusBadge } from './offline.js';
 
 const $app = document.getElementById('app');
 const ui = { view: 'home', matches: [], roster: [], settings: { teamName: 'Мы', opponents: [] }, match: null, st: null, sel: null, sub: null, lineup: [], weServe: true, busy: false };
@@ -26,21 +27,22 @@ async function call(fn) {
 }
 
 function setMatch(match) {
+  const changed = ui.match?.id !== match.id;
   ui.match = match;
   ui.st = replay(match);
   location.hash = 'm=' + match.id;
+  if (changed) sync.attach(match); // другой матч — подхватываем его очередь (если что-то не ушло)
 }
 
 // Выбор игрока сбрасываем сразу, а не после ответа — иначе следующее нажатие могло бы потеряться.
 const clearSel = () => { ui.sel = null; ui.sub = null; };
-const sendEvent = ev => { if (ui.busy) return; clearSel(); render(); call(async () => setMatch(await api('POST', `/api/matches/${ui.match.id}/events`, ev))); };
+// Нажатия идут через очередь: без связи с ноутбуком применяются на экране и досылаются, когда связь вернётся.
+const sync = createSync({ getMatch: () => ui.match && { ...ui.match, events: [...ui.match.events] }, setMatch: m => { setMatch(m); render(); }, onStatus: statusBadge });
+const sendEvent = ev => { clearSel(); sync.post(ev); };
 const undo = () => {
-  if (ui.busy) return;
   clearSel();
-  call(async () => {
-    setMatch(await api('DELETE', `/api/matches/${ui.match.id}/events/last`));
-    if (!ui.st.set) prepareLineup(); // отменили начало первой партии
-  });
+  sync.undo();
+  if (!ui.st.set) { prepareLineup(); render(); } // отменили начало первой партии
 };
 
 const name = id => playerName(ui.match, id);
@@ -361,10 +363,7 @@ const handlers = {
     render();
   },
   weServe: d => { ui.weServe = d.v === '1'; render(); },
-  startSet: () => call(async () => {
-    setMatch(await api('POST', `/api/matches/${ui.match.id}/events`, { t: 'set', lineup: ui.lineup, weServe: ui.weServe }));
-    ui.view = 'live';
-  }),
+  startSet: () => { sync.post({ t: 'set', lineup: ui.lineup, weServe: ui.weServe }); ui.view = 'live'; render(); },
   nextSet: () => { prepareLineup(); render(); },
   sel: d => { ui.sel = ui.sel === d.id ? null : d.id; ui.more = false; render(); },
   unsel: () => { ui.sel = null; render(); },

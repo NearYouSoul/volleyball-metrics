@@ -3,6 +3,7 @@
 // На ноутбуке всё можно делать с клавиатуры: цифра — игрок, буква — результат, Backspace — отмена.
 import { replayQuick, RESULTS, PLAYER_POINTS, PLAYER_ERRORS } from './quick-engine.js';
 import { playerName, setTitle, formatOptions, formatKey, pickFormat } from './engine.js';
+import { createSync, statusBadge } from './offline.js';
 
 const $app = document.getElementById('app');
 const ui = { view: 'home', matches: [], roster: [], settings: { teamName: 'Мы', opponents: [] }, match: null, st: null, sel: null, busy: false };
@@ -31,19 +32,20 @@ async function call(fn) {
 }
 
 function setMatch(match) {
+  const changed = ui.match?.id !== match.id;
   ui.match = match;
   ui.st = replayQuick(match);
   location.hash = 'm=' + match.id;
+  if (changed) sync.attach(match);
 }
 
-const send = ev => { if (ui.busy) return; ui.sel = null; render(); call(async () => setMatch(await api('POST', `/api/matches/${ui.match.id}/events`, ev))); };
+// Нажатия идут через очередь: без связи с ноутбуком очки считаются на экране и досылаются, когда связь вернётся.
+const sync = createSync({ getMatch: () => ui.match && { ...ui.match, events: [...ui.match.events] }, setMatch: m => { setMatch(m); render(); }, onStatus: statusBadge });
+const send = ev => { ui.sel = null; sync.post(ev); };
 const undo = () => {
-  if (ui.busy) return;
   ui.sel = null;
-  call(async () => {
-    setMatch(await api('DELETE', `/api/matches/${ui.match.id}/events/last`));
-    if (!ui.st.set) ui.view = 'serveFirst'; // отменили начало первой партии
-  });
+  sync.undo();
+  if (!ui.st.set) { ui.view = 'serveFirst'; render(); } // отменили начало первой партии
 };
 
 const date = iso => new Date(iso).toLocaleDateString('ru', { day: 'numeric', month: 'long' });
@@ -273,10 +275,7 @@ const handlers = {
     if (!confirm(`Удалить матч с «${m.opponent}» (${date(m.created)})? Он исчезнет из статистики (файл уедет в data/trash).`)) return;
     call(async () => { await api('DELETE', `/api/matches/${d.id}`); await goHome(); });
   },
-  startSet: d => call(async () => {
-    setMatch(await api('POST', `/api/matches/${ui.match.id}/events`, { t: 'set', weServe: d.v === '1' }));
-    ui.view = 'live';
-  }),
+  startSet: d => { sync.post({ t: 'set', weServe: d.v === '1' }); ui.view = 'live'; render(); },
   nextSet: () => { ui.view = 'serveFirst'; render(); },
   sel: d => { ui.sel = ui.sel === d.id ? null : d.id; render(); },
   end: d => send({ t: 'end', res: d.res, p: d.p || null }),

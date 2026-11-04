@@ -1,0 +1,16 @@
+{
+  "name": "Волей Метрика",
+  "short_name": "Волей Метрика",
+  "description": "Статистика волейбольного матча: пульт, студия разбора по видео, аналитика",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0b0d",
+  "theme_color": "#0a0b0d",
+  "lang": "ru",
+  "icons": [
+    { "src": "img/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "img/logo.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

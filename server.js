@@ -20,7 +20,7 @@ const DATA = path.resolve(ROOT, argData || process.env.DATA_DIR || 'data');
 const PORT = Number(process.env.PORT) || 4200;
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2',
-  '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json',
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska',
 };
 // Видеотека: файлы копируются сюда при загрузке (перетаскиванием в студии), список — в videos.json.
@@ -388,6 +388,8 @@ async function api(req, url) {
     return serial(async () => {
       const match = await readJson(file, null);
       if (!match) return null; // матч удалили с другого устройства
+      // Повтор того же нажатия (ответ потерялся при плохой связи) — второй раз не добавляем.
+      if (ev?.cid && match.events.some(e => e.cid === ev.cid)) return hydrate(match, await loadRefs());
       if (at !== null && at >= 0 && at < match.events.length) match.events.splice(at, 0, ev);
       else match.events.push(ev);
       await writeJson(file, match);
@@ -402,9 +404,12 @@ async function api(req, url) {
     });
   }
   if (req.method === 'DELETE' && m[3]) {
+    // ?expect=N — удалить последнее, только если событий ровно N (повтор отмены при плохой связи не удалит лишнего).
+    const expect = url.searchParams.has('expect') ? Number(url.searchParams.get('expect')) : null;
     return serial(async () => {
       const match = await readJson(file, null);
       if (!match) return null;
+      if (expect !== null && match.events.length !== expect) return hydrate(match, await loadRefs());
       match.events.pop();
       await writeJson(file, match);
       return hydrate(match, await loadRefs());
