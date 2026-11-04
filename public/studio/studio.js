@@ -745,9 +745,13 @@ function paintPlayers() {
   if (a) pulse = ui.hoverPid ?? a.suggest;
   else if (c && ['rec', 'their', 'free', 'touch2', 'set', 'att'].includes(c.stage)) pulse = ui.hoverPid ?? ui.cand ?? null;
   const actorId = c?.stage === 'touch2' ? c.touch.p : c?.stage === 'set' || c?.stage === 'att' ? c.p : a?.kind === 'setter' ? a.touch.p : a?.kind === 'attacker' ? a.set.p : null;
+  // Куда смотрят игроки. Связующий на пасе стоит боком — лицом к 4-й зоне (как в жизни).
+  // В защите, когда отмечен наш блок (или точка, откуда бьют), — все разворачиваются к месту удара.
+  const setterNow = c?.stage === 'set' ? c.p : a?.kind === 'attacker' ? a.set?.p : null;
+  const hitFrom = c?.stage === 'their' ? c.origin ?? (c.block ?? ui.blockHover ? { x: (c.block ?? ui.blockHover).x, y: NET + 0.9 } : null) : null;
   court.setPlayers(st.set.lineup.map(id => {
     const p = person(id);
-    return { id, act: ui.acts[id], label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
+    return { id, ...(id === setterNow ? { yaw: Math.PI / 2 } : hitFrom ? { face: hitFrom } : {}), act: ui.acts[id], label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
   }));
 }
 
@@ -1867,7 +1871,7 @@ function replayPlayers(r, t) {
     const z = zones[k], p = person(id);
     let spot = kind === 'att' ? (F.touched?.att?.[rot] ? spotFor(F, 'att', rot, z) : attRole[id]) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st0.rally.server === id && !last) spot = { x: 7.6, y: -0.9 };
-    return { id, label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
+    return { id, ...(last?.skill === 'set' && last.p === id ? { yaw: Math.PI / 2 } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
   });
 }
 let replayKey = null;

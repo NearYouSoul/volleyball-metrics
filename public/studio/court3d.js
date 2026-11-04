@@ -505,8 +505,12 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
         }
       }
     }
-    u.fig.position.y = jump;
-    u.fig.position.z = dz;
+    // Разворот: плавно к нужному углу (по кратчайшей дуге). Разбег идёт вдоль направления взгляда.
+    let dy = (rec.yaw ?? 0) - u.fig.rotation.y;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    u.fig.rotation.y += dy * Math.min(1, dt * 7);
+    const ry = u.fig.rotation.y;
+    u.fig.position.set(Math.sin(ry) * dz, jump, Math.cos(ry) * dz);
     u.hips.position.y = 0.06 + LEG * Math.cos(bend) + 0.035 * Math.abs(Math.sin(u.phase)) * run;
     // Ноги: бедро вперёд на bend ± мах при беге, колено сгибается (сильнее у ноги, которая сзади), стопа — параллельно полу.
     for (const [L, s] of [[u.legL, sw], [u.legR, -sw]]) {
@@ -524,7 +528,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     u.armL.el.rotation.x = eL; u.armR.el.rotation.x = eR;
     // Тень под ногами: в прыжке меньше и бледнее.
     const sc = 0.9 - jump * 0.25;
-    u.blob.scale.set(sc, sc, sc); u.blob.position.z = dz; u.blob.material.opacity = 1 - jump * 0.45;
+    u.blob.scale.set(sc, sc, sc); u.blob.position.x = Math.sin(ry) * dz; u.blob.position.z = Math.cos(ry) * dz; u.blob.material.opacity = 1 - jump * 0.45;
   }
   function setPlayers(list) {
     const seen = new Set();
@@ -540,6 +544,10 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       rec.info = p;
       paintLabel(rec.group, p);
       rec.target = toWorld(p.spot);
+      // Куда смотрит: yaw (радианы, 0 — на сетку, π/2 — влево, к 4-й зоне) или face — точка площадки.
+      if (p.yaw != null) rec.yaw = p.yaw;
+      else if (p.face) { const f = toWorld(p.face); rec.yaw = Math.atan2(-(f.x - rec.target.x), -(f.z - rec.target.z)); }
+      else rec.yaw = 0;
       rec.pinned = !!p.pinned; // игрок у мяча: его не толкают, он толкает других
       rec.hl = !!p.hl;
       const u = rec.group.userData;
