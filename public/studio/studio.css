@@ -529,3 +529,13 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .sr b { font-size: 11px; color: var(--ash); } .sr span { font-size: 14px; font-weight: 600; } .sr small { font-size: 10px; color: var(--smoke); }
 .sr.weak { box-shadow: 0 0 0 1px rgb(255 99 99 / .5); }
 .side-tabs button { gap: 5px; font-size: 12.5px; }
+
+/* Транспорт на ноутбуке: ничего не переносится на вторую строку */
+.sync-btn, .toggle span { white-space: nowrap; }
+@media (max-width: 1440px) {
+  .transport { gap: 4px; }
+  .transport .tc { min-width: 104px; margin: 0 4px; font-size: 12px; }
+  .transport .seg button { min-width: 30px; padding: 0 6px; }
+  .transport .ibtn { width: 30px; height: 30px; }
+  .toggle span.long { display: none; }
+}
