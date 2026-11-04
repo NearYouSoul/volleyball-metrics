@@ -76,6 +76,9 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   el.appendChild(renderer.domElement);
+  // Если видеокарта «отняла» контекст (бывает на слабых ноутбуках при тяжёлом видео) — просим вернуть, а не гаснем навсегда.
+  renderer.domElement.addEventListener('webglcontextlost', e => { e.preventDefault(); console.warn('3D: контекст WebGL потерян, восстанавливаю…'); });
+  renderer.domElement.addEventListener('webglcontextrestored', () => console.warn('3D: контекст WebGL восстановлен'));
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b0c0e);

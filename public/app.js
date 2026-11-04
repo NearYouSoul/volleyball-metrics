@@ -401,3 +401,6 @@ call(async () => {
   if (hashId) await openMatch(hashId);
   else if (openSettings) await loadSettingsView();
 });
+
+// Ссылка на настройки, когда пульт уже открыт (смена #settings без перезагрузки).
+addEventListener('hashchange', () => { if (location.hash === '#settings') call(loadSettingsView); });

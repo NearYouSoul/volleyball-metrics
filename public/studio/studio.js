@@ -1656,14 +1656,20 @@ function stateAt(r) {
 // Ключевые точки полёта мяча: время → точка и высота; между ними — дуга.
 function ballKeys(r) {
   const k = [];
+  let lastSetTo = null;
   for (const pl of r.plays) {
     if (pl.vt == null) continue;
     const t = pl.vt;
-    if (pl.skill === 'serve') { k.push({ t, p: pl.from ?? DEFAULT_SPOT.serveUs, h: 2.8, apex: 4.4 }); if (pl.to) k.push({ t: t + 1.1, p: pl.to, h: 0.3, apex: 3 }); }
+    // Защита без отмеченного удара соперника: мяч прилетает из их передней зоны (зеркально по ширине).
+    if (pl.skill === 'dig' && pl.to && !pl.from) k.push({ t: t - 0.8, p: { x: 9 - pl.to.x, y: 10.4 }, h: 3.1, apex: 3.2 });
+    // Подача приземляется не позже чем через 40% времени до следующего касания (там ещё их приём и атака).
+    const nextVt = r.plays.find(q => q.vt != null && q.vt > t)?.vt;
+    const fly = nextVt ? Math.min(1.1, (nextVt - t) * 0.4) : 1.1;
+    if (pl.skill === 'serve') { k.push({ t, p: pl.from ?? DEFAULT_SPOT.serveUs, h: 2.8, apex: 4.4 }); if (pl.to) k.push({ t: t + fly, p: pl.to, h: 0.3, apex: 3 }); }
     if (pl.skill === 'rec' && pl.to) { k.push({ t: t - 1.2, p: pl.from ?? DEFAULT_SPOT.serveThem, h: 2.8, apex: 4.2 }); k.push({ t, p: pl.to, h: 0.8, apex: 4.6 }); }
     if (pl.skill === 'dig' && pl.to) { if (pl.from) k.push({ t: t - 0.8, p: pl.from, h: 3.1, apex: 3.2 }); k.push({ t, p: pl.to, h: 0.8, apex: 4.6 }); }
-    if (pl.skill === 'set') k.push({ t, p: pl.from ?? SETTER_SPOT, h: 2.5, apex: pl.h ?? TEMPOS[pl.tempo]?.h ?? 4.2 });
-    if (pl.skill === 'att') { k.push({ t, p: pl.from ?? { x: 4.5, y: 7.6 }, h: 3.1, apex: 3.25 }); if (pl.to) k.push({ t: t + 0.55, p: pl.to, h: 0.12, apex: 1.5 }); }
+    if (pl.skill === 'set') { k.push({ t, p: pl.from ?? SETTER_SPOT, h: 2.5, apex: pl.h ?? TEMPOS[pl.tempo]?.h ?? 4.2 }); lastSetTo = pl.to ?? null; }
+    if (pl.skill === 'att') { k.push({ t, p: pl.from ?? lastSetTo ?? { x: 4.5, y: 7.6 }, h: 3.1, apex: 3.25 }); if (pl.to) k.push({ t: t + 0.55, p: pl.to, h: 0.12, apex: 1.5 }); }
     if (pl.skill === 'blk' && pl.to) k.push({ t, p: pl.to, h: 2.9, apex: 3.4 });
   }
   return k.sort((a, b) => a.t - b.t);
@@ -1693,8 +1699,15 @@ function replayPlayers(r, t) {
   const setters = new Set(ui.match.roster.filter(p => p.setter).map(p => p.id));
   const moved = {};
   // Касания текущего владения мячом.
+  let lastSetTo = null;
   for (const pl of done) {
-    if (['serve', 'att'].includes(pl.skill) || pl.res === 'over') { for (const k in moved) delete moved[k]; continue; }
+    if (['serve', 'att'].includes(pl.skill) || pl.res === 'over') {
+      for (const k in moved) delete moved[k];
+      // Нападающий остаётся в точке удара, пока мяч у соперника.
+      if (pl.skill === 'att' && pl.p) { const f = pl.from ?? lastSetTo; if (f) moved[pl.p] = f; }
+      continue;
+    }
+    if (pl.skill === 'set') lastSetTo = pl.to ?? null;
     const pt = pl.skill === 'set' ? pl.from : pl.to;
     if (pl.p && pt) moved[pl.p] = pt;
   }
@@ -2340,7 +2353,7 @@ addEventListener('drop', e => {
 $('fileInput').addEventListener('change', e => { uploadFiles([...e.target.files]); e.target.value = ''; });
 
 // Для отладки из консоли браузера: studio.ui, studio.court.
-window.studio = { ui, court };
+window.studio = { ui, court, rallies, ballKeys, ballAt, replayPlayers };
 
 // ---------- Старт ----------
 setLayout(store.get('layout', 'split'));

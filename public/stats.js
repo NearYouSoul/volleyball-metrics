@@ -1,6 +1,6 @@
 // Дашборд детальной статистики: обзор, ход партии, тепловые карты, отчёт связующего,
 // расстановки, игроки. Всё считается из «розыгрыша по касаниям» (plays) движка — с фильтрами.
-import { replay, totals, newPlayer, playerName, addStats, ACTIONS, LABELS, REC_RATING, attEff, recRating } from './engine.js';
+import { replay, totals, newPlayer, playerName, addStats, ACTIONS, LABELS, REC_RATING, attEff, recRating, SKILLS } from './engine.js';
 import { slotZones, zoneOfSlot, SYSTEMS, zoneOf, TEMPOS, NET } from './court.js';
 import { courtBase, heat, svgWrap, sx, sy } from './studio/court2d.js';
 
@@ -420,3 +420,22 @@ setInterval(async () => {
   await load();
   render();
 }, 4000);
+
+// ---------- Экспорт: касания по текущим фильтрам в CSV (Excel открывает с разделителем «;») ----------
+document.getElementById('csvBtn').addEventListener('click', () => {
+  const v = view();
+  const head = ['Матч', 'Соперник', 'Партия', 'Розыгрыш', 'Счёт', 'Расстановка', 'Подача', 'Игрок', 'Навык', 'Результат', 'Темп', 'Куда пас', 'Кому пас', 'Откуда x', 'Откуда y', 'Куда x', 'Куда y', 'Время видео', 'Розыгрыш выигран'];
+  const byId = Object.fromEntries(v.rows.map(r => [r.m.id, r.m]));
+  const rows = v.plays.filter(p => !p.virtual && (F.player === 'all' || p.p === F.player)).map(p => [
+    dt(byId[p.mid]), byId[p.mid].opponent, p.set + 1, p.rally + 1, `${p.score[0]}:${p.score[1]}`, 'Р' + p.rot, p.weServe ? 'наша' : 'их',
+    p.p ? playerName({ roster: v.people }, p.p) : '', SKILLS[p.skill] ?? p.skill, LABELS[p.skill]?.[p.res] ?? p.res, p.tempo ? TEMPOS[p.tempo]?.short ?? p.tempo : '', p.dir ? DIRS[dirKey(p.dir)] ?? p.dir : '', p.target ? playerName({ roster: v.people }, p.target) : '',
+    p.from?.x ?? '', p.from?.y ?? '', p.to?.x ?? '', p.to?.y ?? '', p.vt ?? '', p.won == null ? '' : p.won ? 'да' : 'нет',
+  ]);
+  const cell = x => { const t = String(x).replace(/\./g, typeof x === 'number' ? ',' : '.'); return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const csv = '\ufeff' + [head, ...rows].map(r => r.map(cell).join(';')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `volleyball-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});

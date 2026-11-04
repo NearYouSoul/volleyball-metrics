@@ -1,6 +1,7 @@
 // Дашборд быстрой статистики. Собирается из блоков; какие блоки и колонки показывать —
 // настраивается кнопкой «Настроить дашборд» и хранится в настройках на сервере (settings.quickDash).
 // Обновляется сам каждые 3 секунды, фильтры — по сопернику и матчу.
+import { setTitle } from './engine.js';
 import { replayQuick, quickTotals, newQuickPlayer, newQuickTeam, RESULTS, PLAYER_POINTS, PLAYER_ERRORS } from './quick-engine.js';
 import { playerName, addStats, pct } from './engine.js';
 
@@ -124,7 +125,7 @@ const BLOCKS = {
           <td>${z(t.oppErr)}</td><td>${z(quickTotals(p).errors)}</td><td>${z(t.oppKill)}</td></tr>`;
       };
       const body = c.single
-        ? c.single.st.sets.map(s => line(`Партия ${s.n + 1}${s.n === 2 ? ' (тай-брейк)' : ''}`, `${s.us}:${s.them}`, c.single.st, s.n)).join('')
+        ? c.single.st.sets.map(s => line(setTitle(s.n, c.single.st.format, s.target), `${s.us}:${s.them}`, c.single.st, s.n)).join('')
         : c.rows.map(({ m, st }) => line(`${esc(m.opponent)}, ${date(m)}`, `${st.setsWon.us}:${st.setsWon.them}`, st, 'all')).join('');
       return `<div class="tablewrap"><table class="table"><thead><tr><th class="l">${c.single ? 'Партия' : 'Матч'}</th>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
     },
@@ -260,7 +261,7 @@ async function refresh() {
     </div>
     ${single ? `<div class="tabs">
         <button class="btn btn-sm ${scope === 'all' ? 'btn-primary' : ''}" data-scope="all">Весь матч</button>
-        ${single.st.sets.map(s => `<button class="btn btn-sm ${scope === s.n ? 'btn-primary' : ''}" data-scope="${s.n}">${s.n === 2 ? 'Тай-брейк' : `Партия ${s.n + 1}`} <span class="num text-ash">${s.us}:${s.them}</span></button>`).join('')}
+        ${single.st.sets.map(s => `<button class="btn btn-sm ${scope === s.n ? 'btn-primary' : ''}" data-scope="${s.n}">${setTitle(s.n, single.st.format, s.target).replace(/ \(до \d+\)/, '')} <span class="num text-ash">${s.us}:${s.them}</span></button>`).join('')}
       </div>` : ''}
     ${!rows.length ? '<p class="muted">Пока нет матчей быстрой статистики.</p>'
       : ctx.dash.blocks.map(id => {
