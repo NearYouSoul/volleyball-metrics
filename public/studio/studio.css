@@ -122,7 +122,7 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 .viewport { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--split, 58%) 6px minmax(0, 1fr); background: #000; }
 .viewport[data-layout=video] { grid-template-columns: 1fr 0 0; }
 .viewport[data-layout=video] .court-pane, .viewport[data-layout=video] .splitter { display: none; }
-.viewport[data-layout=court] { grid-template-columns: 0 0 1fr; }
+.viewport[data-layout=court] { grid-template-columns: minmax(0, 1fr); } /* видимой остаётся одна панель — ей вся ширина */
 .viewport[data-layout=court] .video-pane, .viewport[data-layout=court] .splitter { display: none; }
 .pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .splitter { background: var(--line); cursor: col-resize; }
@@ -161,6 +161,10 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .court-hint span { font-size: 12px; }
 .court-hint span { line-height: 1.5; }
 .court-hint .kbd { margin: 0 1px; }
+.court-hint { align-items: flex-start; }
+.court-hint .hint-i { pointer-events: auto; flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: italic 600 14px Georgia, serif; color: var(--ash); background: rgb(17 18 21 / .82); backdrop-filter: blur(8px); box-shadow: var(--key); }
+.court-hint .hint-i:hover { color: var(--text); }
+.court-hint .hint-i.on { font: 500 16px var(--font); color: var(--text); }
 .court-hint .touches { display: inline-flex; gap: 4px; padding: 5px 7px; }
 .court-hint .touches i { font-style: normal; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; font: 600 11px var(--mono); color: var(--smoke); box-shadow: 0 0 0 1px var(--line-2); }
 .court-hint .touches i.done { background: rgb(89 212 153 / .18); color: var(--mint); box-shadow: none; }
@@ -205,6 +209,9 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .ptile:hover { background: var(--raise); }
 .ptile:active { transform: translateY(1px); }
 .ptile .n { font-size: 21px; font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ptile { container-type: inline-size; padding: 0 4px; }
+/* Без номера на плитке — имя: размер подстраивается под ширину плитки, длинное — в две строки. */
+.ptile .n.name { font-size: clamp(11px, 15cqi, 16px); line-height: 1.15; max-width: 100%; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ptile .nm { font-size: 11px; color: var(--ash); max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ptile .z { position: absolute; top: 4px; left: 6px; font: 500 10px var(--mono); color: var(--smoke); }
 .ptile .tag { position: absolute; top: 4px; right: 6px; font-size: 10px; font-weight: 600; }

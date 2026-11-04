@@ -842,7 +842,7 @@ function tile(id, zone, extra = '') {
   const cls = [ui.sel === id && 'on', ui.sub?.out === id && 'out'].filter(Boolean).join(' ');
   return `<button class="ptile ${cls}" data-a="${ui.sub ? 'subOut' : 'sel'}" data-id="${id}" ${extra}>
     <span class="z">${zone}</span>${tags.join('')}
-    <span class="n">${esc(p.num || p.name)}</span>${p.num ? `<span class="nm">${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</span>` : ''}</button>`;
+    <span class="n${p.num ? '' : ' name'}">${esc(p.num || p.name)}</span>${p.num ? `<span class="nm">${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</span>` : ''}</button>`;
 }
 
 function paintDock() {
@@ -869,7 +869,7 @@ function paintDock() {
     <h4>Расстановка <span class="kbd">1–6</span><span class="grow"></span>
       <button class="btn sm ghost" data-a="sub">${icon('i-swap')}${ui.sub ? 'Отмена' : 'Замена'}</button></h4>
     <div class="rot">${[4, 3, 2, 5, 6, 1].map(z => tile(byZone(z), z)).join('')}</div>
-    ${ui.sub?.out ? `<div class="bench">${bench.map(p => `<button class="ptile" data-a="subIn" data-id="${p.id}"><span class="n">${esc(p.num || p.name)}</span><span class="nm">${esc(p.name)}</span></button>`).join('') || '<span class="muted">Запасных нет</span>'}</div>` : ''}
+    ${ui.sub?.out ? `<div class="bench">${bench.map(p => `<button class="ptile" data-a="subIn" data-id="${p.id}"><span class="n${p.num ? '' : ' name'}">${esc(p.num || p.name)}</span><span class="nm">${esc(p.name)}</span></button>`).join('') || '<span class="muted">Запасных нет</span>'}</div>` : ''}
     <div class="rot-meta"><b>Р${st.rally.rot}</b><span>${esc(SYSTEMS[ui.match.system] || '')}</span><span class="grow"></span>${ui.sub ? '<span>кто уходит?</span>' : ''}</div>
   </div>`;
 
@@ -1157,7 +1157,10 @@ function paintHud() {
   else if (c) {
     const n = touchNo(c);
     if (n) hint.push(`<span class="touches">${[1, 2, 3].map(k => `<i class="${k < n ? 'done' : k === n ? 'on' : ''}">${k}</i>`).join('')}</span>`);
-    hint.push(`<span>${STEP_HINT[c.stage](c)}</span>`);
+    // Подсказка шага свёрнута в кружок «i»: клик — открыть/скрыть (запоминается), при наведении — текст во всплывашке.
+    const text = STEP_HINT[c.stage](c), open = store.get('hintOpen', false);
+    hint.push(`<button class="hint-i ${open ? 'on' : ''}" data-a="hintToggle" title="${open ? 'Скрыть подсказку' : esc(text.replace(/<[^>]+>/g, ''))}">${open ? '×' : 'i'}</button>`);
+    if (open) hint.push(`<span>${text}</span>`);
   }
   $('courtHint').innerHTML = hint.join('');
 }
@@ -2155,6 +2158,7 @@ const H = {
   vzoom: d => zoomAt(+d.d > 0 ? 1.25 : 0.8, vstage.clientWidth / 2, vstage.clientHeight / 2),
   speed: d => { const r = Number(d.v); if (ui.sync) { ui.syncRate = r; store.set('syncRate', r); } else ui.rate = r; video.playbackRate = r; document.querySelectorAll('[data-a=speed]').forEach(b => b.classList.toggle('on', b.dataset.v === d.v)); },
   layout: d => setLayout(d.v),
+  hintToggle: () => { store.set('hintOpen', !store.get('hintOpen', false)); paintHud(); },
   sel: d => { pauseForInput(); ui.sel = ui.sel === d.id ? null : d.id; render(); },
   group: d => { ui.group = d.g === mainGroup() ? null : d.g; render(); },
   act: d => sendAct(d.skill, d.res),
