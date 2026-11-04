@@ -11,7 +11,8 @@ export const ACTIONS = {
   // over — перекид: приняли так, что мяч сразу ушёл к сопернику.
   rec: { pp: null, pm: null, p: null, over: null, error: 'them' },
   // Пас связующего: качество паса для нападающего.
-  set: { perfect: null, good: null, poor: null, error: 'them' },
+  // over — перевод: вторым касанием мяч просто ушёл к сопернику (не атака).
+  set: { perfect: null, good: null, poor: null, over: null, error: 'them' },
   att: { kill: 'us', bo: 'us', play: null, error: 'them', blocked: 'them' },
   blk: { point: 'us', touch: null, out: 'them' },
   dig: { plus: null, minus: null, over: null, error: 'them' },
@@ -25,7 +26,7 @@ export const ACTIONS = {
 const NEXT_PHASE = {
   'serve.good': 'their', 'serve.in': 'their',
   'rec.pp': 'ours', 'rec.pm': 'ours', 'rec.p': 'ours', 'rec.over': 'their',
-  'att.play': 'their', 'blk.touch': 'their',
+  'att.play': 'their', 'blk.touch': 'their', 'set.over': 'their',
   'dig.plus': 'ours', 'dig.minus': 'ours', 'dig.over': 'their',
   'team.over': 'their', 'team.back': 'ours',
 };
@@ -33,7 +34,7 @@ const NEXT_PHASE = {
 export const LABELS = {
   serve: { ace: 'Эйс', good: 'Подача: сложная', in: 'Подача в игру', error: 'Ошибка подачи' },
   rec: { pp: 'Приём ++', pm: 'Приём +', p: 'Приём −', over: 'Приём: перекид', error: 'Ошибка приёма' },
-  set: { perfect: 'Пас: идеальный', good: 'Пас: хороший', poor: 'Пас: неудобный', error: 'Пас: ошибка' },
+  set: { perfect: 'Пас: идеальный', good: 'Пас: хороший', poor: 'Пас: неудобный', over: 'Пас: перевод на их сторону', error: 'Пас: ошибка' },
   att: { kill: 'Атака: забил', bo: 'Атака: блок-аут', play: 'Атака в игру', error: 'Атака: аут/сетка', blocked: 'Атака: заблокирован' },
   blk: { point: 'Блок: очко', touch: 'Блок: касание', out: 'Блок: блок-аут' },
   dig: { plus: 'Защита +', minus: 'Защита −', over: 'Защита: перекид', error: 'Защита: не поднял' },
@@ -51,7 +52,7 @@ const counter = () => ({ n: 0, won: 0 });
 export const newPlayer = () => ({
   serve: { tot: 0, ace: 0, good: 0, err: 0 },
   rec: { tot: 0, pp: 0, pm: 0, p: 0, over: 0, err: 0 },
-  set: { tot: 0, perfect: 0, good: 0, poor: 0, err: 0 },
+  set: { tot: 0, perfect: 0, good: 0, poor: 0, over: 0, err: 0 },
   att: { tot: 0, kill: 0, bo: 0, err: 0, blk: 0 },
   blk: { point: 0, touch: 0, out: 0 },
   dig: { tot: 0, plus: 0, minus: 0, over: 0, err: 0 },

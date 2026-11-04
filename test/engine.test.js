@@ -112,7 +112,7 @@ test('пас: связывается со следующей атакой, на�
   assert.equal(set.dir, 4);
   assert.equal(set.poss, 'trans');
   assert.equal(set.won, true);
-  assert.deepEqual(st.players.all.f.set, { tot: 1, perfect: 1, good: 0, poor: 0, err: 0 });
+  assert.deepEqual(st.players.all.f.set, { tot: 1, perfect: 1, good: 0, poor: 0, over: 0, err: 0 });
   assert.equal(st.plays.find(p => p.skill === 'att').setter, 'f');
 });
 
@@ -167,4 +167,12 @@ test('тайм-ауты и плюс-минус на площадке', async () 
   assert.deepEqual([ef.count, ef.firstWon, ef.runs, ef.brokeRun, ef.nextWon], [1, 1, 1, 1, 2]);
   assert.deepEqual(st.players.all.a.court, { n: 4, us: 2 });
   assert.equal(st.players.all.g, undefined); // запасной не выходил
+});
+
+test('второе касание переводом на их сторону — не атака: мяч у соперника, атак нет', () => {
+  const st = run([{ t: 'set', lineup, weServe: false }, act('rec', 'pm', 'a'), act('set', 'over', 'f')]);
+  assert.equal(st.rally.phase, 'their');
+  assert.equal(st.players.all.f.att.tot, 0);
+  assert.equal(st.players.all.f.set.over, 1);
+  assert.equal(st.set.us + st.set.them, 0); // розыгрыш продолжается
 });

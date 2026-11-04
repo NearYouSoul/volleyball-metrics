@@ -107,7 +107,7 @@ const group = () => ui.group || mainGroup();
 const GROUPS = {
   serve: { label: 'Подача', icon: 's-serve', key: 'A', acts: [['serve', 'ace', 'Эйс', 'g'], ['serve', 'good', 'Сложная', 'g'], ['serve', 'in', 'В игру', 'n'], ['serve', 'error', 'Ошибка', 'r']] },
   rec: { label: 'Приём', icon: 's-rec', key: 'S', acts: [['rec', 'pp', '++ идеально', 'g'], ['rec', 'pm', '+ хороший', 'y'], ['rec', 'p', '− плохой', 'n'], ['rec', 'over', 'Перекид', 'y'], ['rec', 'error', 'Не принял', 'r']] },
-  set: { label: 'Пас', icon: 's-set', key: 'D', acts: [['set', 'perfect', 'Идеальный', 'g'], ['set', 'good', 'Хороший', 'n'], ['set', 'poor', 'Неудобный', 'y'], ['set', 'error', 'Ошибка паса', 'r']] },
+  set: { label: 'Пас', icon: 's-set', key: 'D', acts: [['set', 'perfect', 'Идеальный', 'g'], ['set', 'good', 'Хороший', 'n'], ['set', 'poor', 'Неудобный', 'y'], ['set', 'over', 'Перевод к ним', 'n'], ['set', 'error', 'Ошибка паса', 'r']] },
   att: { label: 'Атака', icon: 's-att', key: 'F', acts: [['att', 'kill', 'Забил', 'g'], ['att', 'bo', 'От блока', 'g'], ['att', 'play', 'В игре', 'n'], ['att', 'error', 'Аут / сетка', 'r'], ['att', 'blocked', 'Заблокир.', 'r']] },
   def: { label: 'Защита и блок', icon: 's-dig', key: 'G', acts: [['dig', 'plus', 'Защита +', 'n'], ['dig', 'minus', 'Защита −', 'y'], ['dig', 'error', 'Не поднял', 'r'], ['blk', 'point', 'Блок: очко', 'g'], ['blk', 'touch', 'Касание блоком', 'y'], ['blk', 'out', 'Блок-аут', 'r']] },
   fault: { label: 'Ошибка', icon: 's-fault', key: 'H', acts: [['fault', 'error', 'Сетка / заступ / касания', 'r']] },
@@ -168,7 +168,7 @@ function sendAct(skill, res) {
   if (skill === 'serve' && !ui.st.rally.weServe) return toast('Сейчас подаёт соперник', true);
   const c = ctx();
   // На шаге паса кнопки качества не отправляют пас, а выбирают качество (кроме ошибки).
-  if (skill === 'set' && c?.stage === 'set' && res !== 'error') { setQuality(res); return; }
+  if (skill === 'set' && c?.stage === 'set' && res !== 'error' && res !== 'over') { setQuality(res); return; }
   const p = actor(skill);
   if (!p && skill !== 'team') return toast('Выберите игрока: клик по фишке на площадке или клавиши 1–6 (номер зоны)', true);
   const ev = stamp({ t: 'act', skill, res, p: skill === 'team' ? null : p });
@@ -509,7 +509,8 @@ function stepPoint(c, p, right, hit) {
       return awaitPlayer('setter', p, suggest, { touch: t, res: gradeFor(t, p) });
     }
     case 'set': {
-      if (p.y >= NET) return attackLanding(p, right, { p: c.p, from: c.from }); // скидка вторым касанием
+      // Второе касание на их половину — не обязательно атака: перевод (мяч просто ушёл к ним) или скидка.
+      if (p.y >= NET) return secondOverMenu(p, c);
       return awaitPlayer('attacker', p, attackerFor(p, c.p), { set: c });
     }
     case 'att': {
@@ -546,6 +547,21 @@ function attackLanding(p, right, c) {
   clearLanding();
   landing = { p, ev, timer: setTimeout(() => { const l = landing; landing = null; ui.draft = null; postAct({ ...l.ev, res: 'play' }); }, DBL_MS) };
   court.setPending({ to: p });
+}
+// Второе касание на сторону соперника: связующий (или кто играл вторым) перевёл мяч или сделал скидку.
+function secondOverMenu(p, c) {
+  const set = { skill: 'set', p: c.p, from: c.from, to: p, ...(c.t != null && { vt: c.t }) };
+  const att = { skill: 'att', p: c.p, from: c.from, to: p, ...(c.t != null && { vt: c.t }) };
+  const go = ev => { ui.draft = null; ui.setH = null; postAct(ev); };
+  if (!inCourtThem(p)) return openMenu(p, 0, [
+    ['Перевод в аут — ошибка паса', 'r', () => go({ ...set, res: 'error' })],
+    ['Скидка в аут — ошибка атаки', 'r', () => go({ ...att, res: 'error' })],
+  ], 'Второе касание за их линии');
+  openMenu(p, 0, [
+    ['Перевод — мяч ушёл к ним', 'n', () => go({ ...set, res: 'over' })],
+    ['Скидка — в игре', 'y', () => go({ ...att, res: 'play' })],
+    ['Скидка — очко', 'g', () => go({ ...att, res: 'kill' })],
+  ], `Второе касание: ${esc(name(c.p))}`);
 }
 function clearLanding() { if (landing) { clearTimeout(landing.timer); landing = null; } }
 // Общий разбор одиночного / двойного клика по полу: одиночный ждёт ~0,3 с, не будет ли второго рядом.
@@ -685,7 +701,7 @@ function focusPlays() {
   if (ui.focusRally) return rallyByKey(ui.focusRally)?.plays ?? [];
   // Во время ввода — только текущая фаза: когда мяч перешёл к сопернику, прошлые линии убираем.
   const rp = rallyPlays();
-  const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'blk.touch', 'team.over']);
+  const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'set.over', 'blk.touch', 'team.over']);
   let k = -1;
   rp.forEach((p, i) => { if (CROSS.has(`${p.skill}.${p.res}`)) k = i; });
   return k >= 0 && baseStage(ctx()) === 'their' ? [] : rp.slice(k + 1);
@@ -731,7 +747,8 @@ function ballScript() {
       if (to) {
         // Кто бьёт: из записанной атаки, иначе — выбранный нападающий текущего шага.
         const att = next ? (next.skill === 'att' ? next.p : null) : d.att?.p ?? (c?.stage === 'att' ? c.p : null);
-        add({ kind: 'set', from, to, y0: 2.5, y1: 3.0, apex: pl.h ?? TEMPOS[pl.tempo]?.h ?? 4.2, by: pl.p, catcher: att, catchAs: att ? 'att' : null });
+        if (pl.res === 'over' || pl.res === 'error') add({ kind: 'free', from, to, y0: 2.5, y1: 0.12, apex: 3.6, by: pl.p });
+        else add({ kind: 'set', from, to, y0: 2.5, y1: 3.0, apex: pl.h ?? TEMPOS[pl.tempo]?.h ?? 4.2, by: pl.p, catcher: att, catchAs: att ? 'att' : null });
         lastSetTo = to;
       }
     }
@@ -821,7 +838,7 @@ function paintCourt() {
   const c = ctx();
   // Новый розыгрыш или мяч ушёл к сопернику — игроки возвращаются в расстановку.
   // Сколько раз мяч перешёл на их сторону в этом розыгрыше: при каждом переходе игроки заново встают в расстановку.
-  const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'blk.touch', 'team.over']);
+  const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'set.over', 'blk.touch', 'team.over']);
   const key = `${rallyKey()}:${rallyPlays().filter(p => CROSS.has(`${p.skill}.${p.res}`)).length}`;
   if (key !== ui.movedKey) { ui.moved = {}; ui.movedKey = key; if (ui.draft && !ui.draft.touch && !ui.draft.set && !ui.draft.att && !ui.draft.origin && !ui.draft.await) ui.draft = null; }
   if (ui.rallyKeySeen !== rallyKey()) { ui.rallyKeySeen = rallyKey(); if (!ui.draft?.set && !ui.draft?.touch) ui.draft = null; }

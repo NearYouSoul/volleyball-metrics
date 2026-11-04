@@ -180,7 +180,7 @@ const GROUPS = {
     btn('r', 'att', 'error', 'Аут / сетка', p), btn('r', 'att', 'blocked', 'Заблокир.', p)]],
   def: p => ['Защита и блок', [btn('g', 'blk', 'point', 'Блок: очко', p), btn('n', 'dig', 'plus', 'Защита +', p), btn('y', 'dig', 'minus', 'Защита −', p),
     btn('y', 'blk', 'touch', 'Касание блоком', p), btn('r', 'blk', 'out', 'Блок-аут', p), btn('r', 'dig', 'error', 'Не поднял', p)]],
-  set: p => ['Пас', [btn('g', 'set', 'perfect', 'Идеальный', p), btn('n', 'set', 'good', 'Хороший', p), btn('y', 'set', 'poor', 'Неудобный', p), btn('r', 'set', 'error', 'Ошибка паса', p)]],
+  set: p => ['Пас', [btn('g', 'set', 'perfect', 'Идеальный', p), btn('n', 'set', 'good', 'Хороший', p), btn('y', 'set', 'poor', 'Неудобный', p), btn('n', 'set', 'over', 'Перевод к ним', p), btn('r', 'set', 'error', 'Ошибка паса', p)]],
   fault: p => ['Прочее', [btn('r', 'fault', 'error', 'Ошибка: сетка / заступ / касания', p)]],
 };
 const MAIN_GROUP = { rec: 'rec', ours: 'att', their: 'def', serve: 'def' };
