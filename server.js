@@ -8,7 +8,8 @@ import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
-import { replay } from './public/engine.js';
+import { replay, LABELS } from './public/engine.js';
+import { buildTeamPackage, readTeamPackage, applyTeamPackage, buildMatchPackage, readMatchPackage, importMatch, statsCsv, TEAM_PARTS } from './transfer.js';
 import { replayQuick } from './public/quick-engine.js';
 import { hasFfmpeg, probe, plan, convert, cutHighlights } from './media.js';
 
@@ -153,6 +154,19 @@ function readBody(req) {
   });
 }
 
+// Тело запроса как есть (файлы импорта: ZIP или JSON), до limit байт.
+function readRaw(req, limit = 64e6) {
+  return new Promise((resolve, reject) => {
+    const chunks = []; let n = 0;
+    req.on('data', c => { n += c.length; if (n > limit) { req.destroy(); reject(new Error('Файл слишком большой')); } else chunks.push(c); });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+// Ответ-файл для скачивания: обработчик возвращает { file: { name, type, data } }.
+const download = (name, data, type = 'application/zip') => ({ [FILE]: { name, type, data } });
+const FILE = Symbol('file');
+
 // full — отдать матчи целиком (для дашборда), иначе только краткую сводку (для меню пульта).
 // mode — 'quick' (быстрая статистика) или 'detail' (детальная; у старых матчей поля mode нет).
 async function readMatches(mode) {
@@ -228,6 +242,62 @@ async function api(req, url) {
       events: [],
     };
     return serial(async () => { await writeJson(matchFile(match.id), match); return hydrate(match, refs); });
+  }
+
+  // ---------- Экспорт и импорт ----------
+  // Пакет команды (без матчей): состав, форма и эмблема, схема и расстановки, соперники — ZIP.
+  if (route === 'GET /api/export/team') {
+    const parts = (url.searchParams.get('parts') || Object.keys(TEAM_PARTS).join(',')).split(',').filter(k => TEAM_PARTS[k]);
+    const f = buildTeamPackage(await loadRefs(), parts);
+    return download(f.name, f.data);
+  }
+  // Посмотреть пакет перед загрузкой: что внутри.
+  if (route === 'POST /api/import/team/preview') {
+    try {
+      const t = readTeamPackage(await readRaw(req));
+      return { teamName: t.teamName, exported: t.exported, parts: t.parts, players: t.roster?.length ?? 0, opponents: t.opponents?.length ?? 0, presets: t.play?.presets?.length ?? (t.play?.formations ? 1 : 0) };
+    } catch (e) { return { error: e.message }; }
+  }
+  if (route === 'POST /api/import/team') {
+    let team;
+    try { team = readTeamPackage(await readRaw(req)); } catch (e) { return { error: e.message }; }
+    const parts = (url.searchParams.get('parts') || '').split(',').filter(k => TEAM_PARTS[k]);
+    return serial(async () => {
+      await makeBackup('перед загрузкой пакета команды');
+      const refs = await loadRefs();
+      const { roster, settingsPatch, report } = applyTeamPackage(refs, team, parts);
+      await writeJson(rosterFile, roster);
+      await writeJson(settingsFile, { ...refs.settings, ...settingsPatch });
+      return report;
+    });
+  }
+  // Один матч: события, состав на матч, соперник — ZIP (видео не входит).
+  const em = url.pathname.match(/^\/api\/export\/match\/([a-z0-9]+)$/);
+  if (em && req.method === 'GET') {
+    const m = await readJson(matchFile(em[1]), null);
+    if (!m) return null;
+    const refs = await loadRefs();
+    const f = buildMatchPackage(hydrate(m, refs), refs, LABELS);
+    return download(f.name, f.data);
+  }
+  if (route === 'POST /api/import/match') {
+    let pkg;
+    try { pkg = readMatchPackage(await readRaw(req)); } catch (e) { return { error: e.message }; }
+    return serial(async () => {
+      const refs = await loadRefs();
+      const ids = new Set((await readdir(DATA)).map(f => /^match-([a-z0-9]+)\.json$/.exec(f)?.[1]).filter(Boolean));
+      const { match, roster, opponents } = importMatch({ ...refs, ids }, pkg);
+      await writeJson(rosterFile, roster);
+      await writeJson(settingsFile, { ...refs.settings, opponents });
+      await writeJson(matchFile(match.id), match);
+      return { id: match.id, opponent: match.opponent, events: match.events.length };
+    });
+  }
+  // Статистика игроков по всем детальным матчам — таблица для Excel.
+  if (route === 'GET /api/export/stats.csv') {
+    const refs = await loadRefs();
+    const matches = (await readMatches('detail')).map(m => hydrate(m, refs));
+    return download(`Статистика_${refs.settings.teamName || 'команда'}_${new Date().toISOString().slice(0, 10)}.csv`, statsCsv(matches), 'text/csv; charset=utf-8');
   }
 
   // ---------- Резервные копии и корзина ----------
@@ -480,6 +550,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) {
       const result = await api(req, url);
       if (res.headersSent) return;
+      if (result?.[FILE]) {
+        const f = result[FILE], body = Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data, 'utf8');
+        res.writeHead(200, { 'Content-Type': f.type, 'Content-Length': body.length, 'Content-Disposition': `attachment; filename="export"; filename*=UTF-8''${encodeURIComponent(f.name)}`, 'Cache-Control': 'no-store' });
+        return res.end(body);
+      }
       res.writeHead(result === null ? 404 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify(result));
     }

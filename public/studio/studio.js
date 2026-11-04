@@ -1756,10 +1756,41 @@ async function openDataModal() {
   paintSettings();
 }
 function paintDataModal() { paintSettings(); }
+// Экспорт: пакет команды (без матчей), один матч, таблица статистики; импорт — пакет команды и матч.
+const TEAM_PARTS = { roster: 'Состав: игроки, номера, роли', kit: 'Название, эмблема, форма', play: 'Схема игры, расстановки, зоны доводки', opps: 'Соперники и их эмблемы' };
+function exportBody() {
+  const ex = (ui.exportParts ??= Object.keys(TEAM_PARTS));
+  const imp = ui.teamImport;
+  const matches = ui.matches ?? [];
+  const sel = ui.exportMatch ?? ui.match?.id ?? matches[0]?.id ?? '';
+  return `<h3 class="mh">Пакет команды</h3>
+    <p class="muted" style="margin:0 0 8px">Всё, что касается команды, без матчей — передать помощнику или перенести на другой компьютер. Архив ZIP: внутри ещё состав таблицей и эмблемы картинками.</p>
+    <div class="chkgrid">${Object.entries(TEAM_PARTS).map(([k, l]) => `<label class="toggle"><input type="checkbox" data-k="expPart" data-v="${k}" ${ex.includes(k) ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+    <div class="dbtns"><a class="btn primary ${ex.length ? '' : 'disabled'}" href="/api/export/team?parts=${ex.join(',')}" download>⤓ Скачать пакет команды</a>
+      <label class="btn">⤒ Загрузить пакет команды<input type="file" accept=".zip,.json,application/zip,application/json" hidden data-k="teamPkgFile"></label></div>
+    ${imp ? `<div class="card impcard"><b>${esc(imp.info.teamName)}</b><small>файл от ${new Date(imp.info.exported).toLocaleDateString('ru')} · игроков ${imp.info.players} · соперников ${imp.info.opponents}</small>
+      <div class="chkgrid">${imp.info.parts.map(k => `<label class="toggle"><input type="checkbox" data-k="impPart" data-v="${k}" ${imp.parts.includes(k) ? 'checked' : ''}><span>${TEAM_PARTS[k] ?? k}</span></label>`).join('')}</div>
+      <small>Игроки и соперники добавятся или обновятся (по номеру и имени), никто не удалится. Перед загрузкой делается резервная копия.</small>
+      <div class="dbtns"><button class="btn primary" data-a="teamImport">Загрузить выбранное</button><button class="btn ghost" data-a="teamImportCancel">Отмена</button></div></div>` : ''}
+    <h3 class="mh">Матч</h3>
+    <p class="muted" style="margin:0 0 8px">Один матч: события, состав, соперник, плюс события таблицей. Видео не входит — его привязывают заново.</p>
+    <div class="dbtns"><select data-k="expMatch">${matches.map(m => `<option value="${m.id}" ${m.id === sel ? 'selected' : ''}>${esc(m.opponent)} · ${new Date(m.created).toLocaleDateString('ru')}</option>`).join('')}</select>
+      <a class="btn ${sel ? '' : 'disabled'}" href="/api/export/match/${sel}" download>⤓ Скачать матч</a>
+      <label class="btn">⤒ Загрузить матч<input type="file" accept=".zip,.json,application/zip,application/json" hidden data-k="matchPkgFile"></label></div>
+    <h3 class="mh">Статистика игроков</h3>
+    <div class="dbtns"><a class="btn" href="/api/export/stats.csv" download>⤓ Таблица по всем матчам (CSV для Excel)</a></div>
+    <h3 class="mh">Все данные</h3>`;
+}
+async function uploadPkg(url, file) {
+  const r = await fetch(url, { method: 'POST', body: file });
+  const out = await r.json();
+  if (out?.error) throw new Error(out.error);
+  return out;
+}
 function dataBody() {
   const { backups, trash } = ui.dataView;
   const when = iso => (iso ? new Date(iso).toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
-  return `
+  return `${exportBody()}
     <p>Копия — состав, настройки (пресеты, эмблемы, турниры) и все матчи. Делается сама раз в день (хранятся 30 последних),
       лежит в <code>data/backups</code>. Видео в копию не входит — оно в <code>data/videos</code>.</p>
     <div class="dbtns">
@@ -2376,6 +2407,15 @@ const H = {
   setTab: d => openSettings(d.v),
   setOpt: d => applyOpt(d.k, d.v),
   settingsClose: () => { modal(''); ui.dataView = null; },
+  teamImportCancel: () => { ui.teamImport = null; paintSettings(); },
+  teamImport: () => call(async () => {
+    const t = ui.teamImport;
+    if (!t.parts.length) return toast('Отметьте, что загрузить', true);
+    const r = await uploadPkg(`/api/import/team?parts=${t.parts.join(',')}`, t.file);
+    ui.teamImport = null;
+    await loadAll(); court.setKit(ui.settings.kit); await loadDataView(); paintSettings();
+    toast(`Пакет загружен${r.parts.includes('roster') ? ` · игроков: новых ${r.roster.added}, обновлено ${r.roster.updated}` : ''}${r.parts.includes('opps') ? ` · соперников: новых ${r.opps.added}` : ''}`);
+  }),
   bkMake: () => call(async () => { const b = await api('POST', '/api/backups'); await openDataModal(); toast(`Копия сделана: матчей ${b.matches}`); }),
   bkDownload: () => call(async () => {
     const data = await api('GET', '/api/backup/file');
@@ -2633,6 +2673,25 @@ document.addEventListener('change', e => {
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (k === 'fskill') { ui.filter.skill = v; render(); }
   if (k === 'optTips' && v !== tips.on) { tips.toggle(); }
+  if (k === 'expPart' || k === 'impPart') {
+    const list = k === 'expPart' ? (ui.exportParts ??= []) : ui.teamImport.parts, key = e.target.dataset.v;
+    const next = v ? [...new Set([...list, key])] : list.filter(x => x !== key);
+    if (k === 'expPart') ui.exportParts = next; else ui.teamImport.parts = next;
+    paintSettings();
+  }
+  if (k === 'expMatch') { ui.exportMatch = v; paintSettings(); }
+  if (k === 'teamPkgFile' && e.target.files[0]) {
+    const file = e.target.files[0];
+    call(async () => { const info = await uploadPkg('/api/import/team/preview', file); ui.teamImport = { file, info, parts: [...info.parts] }; paintSettings(); });
+  }
+  if (k === 'matchPkgFile' && e.target.files[0]) {
+    const file = e.target.files[0];
+    call(async () => {
+      const r = await uploadPkg('/api/import/match', file);
+      await loadAll(); await loadDataView(); paintSettings();
+      toast(`Матч загружен: ${r.opponent} · событий ${r.events}`);
+    });
+  }
   if (k === 'optStart') store.set('startScreen', v);
   if (k === 'optAutoPause') { $('autoPause').checked = v; store.set('autoPause', v); }
   if (k === 'optZones') { store.set('zonesOn', v); court.toggleZones(v); document.querySelector('[data-a=zones]')?.classList.toggle('on', v); }

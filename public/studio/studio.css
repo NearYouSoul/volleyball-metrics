@@ -643,3 +643,9 @@ body.tips-on button[data-tip], body.tips-on a[data-tip], body.tips-on input[data
 @media (max-width: 640px) { .setwin { grid-template-columns: 1fr; } .setnav { flex-direction: row; flex-wrap: wrap; } }
 .srow .seg { flex: none; }
 .srow .seg button { white-space: nowrap; }
+
+.chkgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin: 6px 0 10px; }
+.impcard { display: grid; gap: 6px; padding: 12px 14px; margin: 4px 0 6px; }
+.impcard small { color: var(--smoke); }
+.btn.disabled { opacity: .45; pointer-events: none; }
+.dbtns select { min-width: 220px; }
