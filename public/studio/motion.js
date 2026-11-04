@@ -18,8 +18,8 @@ export const FIELDS = ['hL', 'abL', 'kL', 'fL', 'hR', 'abR', 'kR', 'fR', 'lean',
 // руки согнуты перед собой на уровне пояса.
 export const READY = {
   hL: 0.42, abL: 0.17, kL: 0.84, fL: 0.1, hR: 0.55, abR: 0.17, kR: 0.88, fR: 0.1,
-  lean: 0.38, twist: 0, roll: 0, head: 0.32,
-  sL: 0.68, szL: 0.2, eL: 1.3, sR: 0.68, szR: 0.2, eR: 1.3, fing: 0.2, fwd: 0,
+  lean: 0.52, twist: 0, roll: 0, head: 0.45,
+  sL: 0.8, szL: 0.2, eL: 1.25, sR: 0.8, szR: 0.2, eR: 1.25, fing: 0.2, fwd: 0,
 };
 
 // Ключевые позы: каждая следующая — изменения к предыдущей.

@@ -1063,5 +1063,6 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     setWheelCapture: on => { wheelCapture = on; controls.enableZoom = !on; },
     toggleZones: on => { zoneGrid.visible = on ?? !zoneGrid.visible; return zoneGrid.visible; },
     dispose: () => { renderer.setAnimationLoop(null); renderer.dispose(); },
+    debug: () => ({ camera, controls, players, scene }), // для проверок и скриншотов
   };
 }

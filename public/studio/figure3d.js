@@ -243,8 +243,8 @@ function buildReal(root, { M, jersey, numMat, look }) {
     // Наколенник, гетра, кроссовка — на кости колена/стопы.
     mesh(G.pad, M.pad, knee, 0, -0.005, -0.008).scale.set(1, 1, 0.95);
     mesh(G.sock, M.sock, knee, 0, -(R.kneeY - 0.16), 0.004);
-    mesh(G.shoe, M.shoe, ankle, 0, -R.ankleY, 0);
-    mesh(G.sole, M.sole, ankle, 0, -R.ankleY, 0);
+    mesh(G.shoe, M.shoe, ankle, 0, -R.ankleY, 0.01).scale.set(0.9, 0.82, 0.86);
+    mesh(G.sole, M.sole, ankle, 0, -R.ankleY, 0.01).scale.set(0.9, 0.9, 0.86);
     return { hip, knee, ankle };
   };
   const legL = legs(-1), legR = legs(1);
