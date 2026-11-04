@@ -2,8 +2,10 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
+  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0a0b0d">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Статистика волейбола</title>
+  <title>Волей Метрика</title>
   <link rel="stylesheet" href="app.css">
 </head>
 <body class="min-h-dvh">
@@ -12,8 +14,12 @@
 
   <main class="relative mx-auto flex min-h-dvh max-w-2xl flex-col px-4 pt-8 pb-6">
     <header class="flex items-center gap-3">
-      <span class="logo"></span>
-      <span id="team" class="text-sm font-medium">Волейбол</span>
+      <img src="img/logo.svg" alt="" class="size-10 rounded-[10px]">
+      <span class="leading-tight">
+        <b class="block text-[15px] font-semibold tracking-[-0.005em]">Волей Метрика</b>
+        <span id="team" class="text-xs text-ash">статистика волейбола</span>
+      </span>
+      <img id="emblem" alt="" class="ml-auto hidden size-10 rounded-full bg-well object-contain p-1">
     </header>
 
     <h1 class="mt-14 text-[40px] leading-[1.1] font-normal tracking-[0.004em]">Статистика матча</h1>
@@ -63,7 +69,10 @@
 
   <script type="module">
     // Название команды и адреса для телефона — чтобы не лезть в настройки.
-    fetch('/api/settings').then(r => r.json()).then(s => { document.getElementById('team').textContent = s.teamName; }).catch(() => {});
+    fetch('/api/settings').then(r => r.json()).then(s => {
+      document.getElementById('team').textContent = s.teamName;
+      if (s.emblem) { const e = document.getElementById('emblem'); e.src = s.emblem; e.classList.remove('hidden'); }
+    }).catch(() => {});
     fetch('/api/qr').then(r => r.json()).then(q => {
       const phone = q.urls[0] ? `телефон: ${q.urls[0].replace(/^http:\/\/|\/$/g, '')}` : 'нет сети для телефона';
       document.getElementById('meta').textContent = `${location.host} | ${phone}`;

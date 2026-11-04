@@ -248,7 +248,7 @@ async function refresh() {
 
   paint(`
     <div class="topbar">
-      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><span class="logo scale-75"></span>Режимы</a>
+      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Режимы</a>
       <span class="flex gap-2"><a class="btn btn-ghost btn-sm" href="quick.html">Пульт</a><button class="btn btn-sm" data-cfg="open">Настроить дашборд</button></span>
     </div>
     <h1>${title}</h1>
@@ -281,7 +281,7 @@ function paint(html) {
 
 function renderConfig() {
   lastHtml = ''; // после закрытия панели дашборд должен нарисоваться заново
-  $app.innerHTML = `<div class="topbar"><a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><span class="logo scale-75"></span>Режимы</a></div><h1>Настройка дашборда</h1>${viewConfig()}`;
+  $app.innerHTML = `<div class="topbar"><a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Режимы</a></div><h1>Настройка дашборда</h1>${viewConfig()}`;
 }
 
 async function saveDash(dash) {

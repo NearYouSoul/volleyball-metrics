@@ -68,7 +68,7 @@ function result(key, p = null, cls = '') {
 function viewHome() {
   return `
     <nav class="flex items-center justify-between">
-      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><span class="logo scale-75"></span>Режимы</a>
+      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Режимы</a>
       <a class="btn btn-ghost btn-sm -mr-3" href="quick-stats.html">Дашборд</a>
     </nav>
     <h1 class="mt-6 text-[32px] leading-tight font-normal">Быстрая статистика</h1>

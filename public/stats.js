@@ -11,6 +11,7 @@ const pc = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '–');
 const sgn = v => (v > 0 ? '+' : '') + v;
 const dt = m => new Date(m.created).toLocaleDateString('ru');
 const z = v => v || '·';
+const emb = src => (src ? `<img class="emb" src="${src}" alt="">` : '');
 
 // Цвета. Категории (направления паса) — проверенная палитра для тёмного фона; исходы — «наш/их» с подписью.
 const DIRS = { 4: 'Край (4)', 3: 'Центр (3)', 2: 'Диагональ (2)', pipe: 'Пайп', back: 'Задняя линия', dump: 'Скидка' };
@@ -106,7 +107,7 @@ function overview(v) {
   const pts = totals(sum);
   return `<section class="dsec" id="overview">
     <h2>Обзор</h2>
-    <p class="sub">${v.rows.length === 1 ? `${esc(v.settings.teamName)} ${v.rows[0].st.setsWon.us}:${v.rows[0].st.setsWon.them} ${esc(v.rows[0].m.opponent)} · ${v.rows[0].st.sets.map(s => `${s.us}:${s.them}`).join(', ')}` : `Матчей: ${v.rows.length}`}${F.rot !== 'all' ? ` · только расстановка Р${F.rot}` : ''}</p>
+    <p class="sub">${v.rows.length === 1 ? `${emb(v.settings.emblem)}${esc(v.settings.teamName)} ${v.rows[0].st.setsWon.us}:${v.rows[0].st.setsWon.them} ${emb(v.settings.opponents.find(o => o.id === v.rows[0].m.opponentId)?.emblem)}${esc(v.rows[0].m.opponent)} · ${v.rows[0].st.sets.map(s => `${s.us}:${s.them}`).join(', ')}` : `${emb(v.settings.emblem)}Матчей: ${v.rows.length}`}${F.rot !== 'all' ? ` · только расстановка Р${F.rot}` : ''}</p>
     <div class="kpis">
       ${kpi('Сайд-аут', pc(so.won, so.n), `выиграли ${so.won} из ${so.n} на их подаче`)}
       ${kpi('Брейк', pc(brk.won, brk.n), `выиграли ${brk.won} из ${brk.n} на своей подаче`)}

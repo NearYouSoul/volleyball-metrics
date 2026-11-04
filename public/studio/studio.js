@@ -775,6 +775,17 @@ function paintBar() {
 }
 
 // ---------- Отрисовка ----------
+// Эмблема команды: картинка или кружок с инициалами (цвет — от названия, всегда один и тот же).
+function emblem(src, title, cls = '') {
+  if (src) return `<img class="emb ${cls}" src="${src}" alt="">`;
+  const ini = String(title || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  let h = 0; for (const ch of String(title)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `<span class="emb ini ${cls}" style="background:hsl(${h} 45% 32%)">${esc(ini)}</span>`;
+}
+const oppOf = m => ui.settings.opponents.find(o => o.id === m?.opponentId);
+const ourEmblem = (cls = '') => emblem(ui.settings.emblem, ui.settings.teamName, cls);
+const oppEmblem = (m, cls = '') => emblem(oppOf(m)?.emblem, m?.opponent, cls);
+
 function paintTop() {
   const m = ui.match, st = ui.st;
   document.querySelector('.top-actions .btn-chip').href = m ? `stats.html#m=${m.id}` : 'stats.html';
@@ -782,9 +793,9 @@ function paintTop() {
   if (!m || !st.set) { $('score').innerHTML = ''; $('phase').innerHTML = ''; $('phase').className = 'phase-pill'; return; }
   const s = st.set;
   $('score').innerHTML = `
-    <div class="team"><span class="${s.serving === 'us' ? 'serving' : ''}"></span>${esc(ui.settings.teamName)}<span class="pts">${s.us}</span></div>
+    <div class="team"><span class="${s.serving === 'us' ? 'serving' : ''}"></span>${ourEmblem()}${esc(ui.settings.teamName)}<span class="pts">${s.us}</span></div>
     <div class="mid"><b>${st.setsWon.us} : ${st.setsWon.them}</b>партия ${s.n + 1}</div>
-    <div class="team them"><span class="${s.serving === 'them' ? 'serving' : ''}"></span>${esc(m.opponent)}<span class="pts">${s.them}</span></div>`;
+    <div class="team them"><span class="${s.serving === 'them' ? 'serving' : ''}"></span>${oppEmblem(m)}${esc(m.opponent)}<span class="pts">${s.them}</span></div>`;
   if (s.over) { $('phase').className = 'phase-pill'; $('phase').innerHTML = '<i></i>Партия окончена'; return; }
   const ph = { serve: ['Наша подача', `подаёт ${esc(name(st.rally.server))}`], rec: ['Приём', 'подают они'], ours: ['Мяч у нас', 'пас и атака'], their: ['Мяч у них', 'защита или блок'] }[st.rally.phase];
   $('phase').className = `phase-pill ph-${st.rally.phase}`;
@@ -986,7 +997,7 @@ function sideVideo() {
 
 function sideMatch() {
   const m = ui.match, st = ui.st;
-  const list = ui.matches.map(x => `<div class="mitem ${m?.id === x.id ? 'on' : ''}" data-a="open" data-id="${x.id}">
+  const list = ui.matches.map(x => `<div class="mitem ${m?.id === x.id ? 'on' : ''}" data-a="open" data-id="${x.id}">${emblem(ui.settings.opponents.find(o => o.id === x.opponentId)?.emblem, x.opponent, 'sm')}
     <span class="grow"><b>${esc(x.opponent)}</b><small>${new Date(x.created).toLocaleDateString('ru')} · событий ${x.events}${x.videos.length ? ' · видео ' + x.videos.length : ''}</small></span>
     <span class="sc">${x.setsWon.us}:${x.setsWon.them}</span>
     <button class="rowdel" data-a="matchDel" data-id="${x.id}" title="Удалить матч">${icon('i-x')}</button></div>`).join('');
@@ -1023,7 +1034,9 @@ function sideMatch() {
     <h3>Зоны доводки</h3>
     <p class="muted">Оценка приёма и защиты ставится сама — по точке, куда мяч пришёл к пасующему. <button class="btn sm" data-a="zonesEditor" style="margin-top:8px">Настроить зоны ++ / +− / +</button></p>
     <h3>Команда</h3>
-    <p class="muted">Игроки, отметка «связующий» и соперники — в <a href="detailed.html#settings" style="color:var(--sky)">настройках</a>.</p>`;
+    <div class="card teamcard">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>соперников: ${ui.settings.opponents.length}</small></span>
+      <button class="btn sm" data-a="teamModal">Название и эмблемы</button></div>
+    <p class="muted" style="margin-top:8px">Игроки и их роли — в <a href="detailed.html#settings" style="color:var(--sky)">настройках пульта</a>.</p>`;
 }
 
 // ---------- Таймлайн ----------
@@ -1153,7 +1166,7 @@ async function openNewMatch() {
   modal(`<h2>Новый матч</h2>
     <div class="field">Формат матча<select id="fmt">${formatOptions(formatKey(ui.settings.lastFormat))}</select></div>
     <p style="margin-top:14px">С кем играем?</p>
-    <div class="mlist">${ui.settings.opponents.map(o => `<div class="mitem" data-a="createMatch" data-id="${o.id}"><span class="grow"><b>${esc(o.name)}</b></span></div>`).join('') || '<p class="muted">Соперников пока нет.</p>'}</div>
+    <div class="mlist">${ui.settings.opponents.map(o => `<div class="mitem" data-a="createMatch" data-id="${o.id}">${emblem(o.emblem, o.name, 'sm')}<span class="grow"><b>${esc(o.name)}</b></span></div>`).join('') || '<p class="muted">Соперников пока нет.</p>'}</div>
     <div class="field">Новый соперник<div style="display:flex;gap:8px"><input id="newOpp" placeholder="Название команды" style="flex:1"><button class="btn primary" data-a="createNewOpp">Создать</button></div></div>
     <div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button></div>`);
   setTimeout(() => $('newOpp')?.focus(), 30);
@@ -1420,6 +1433,44 @@ function paintFormEditor(fromRot = null) {
     (f.touched[f.kind] ??= {})[f.rot] = true;
     paintFormEditor();
   };
+}
+
+
+// ---------- Команда: название и эмблемы ----------
+// Картинку сразу уменьшаем до 160 px (PNG с прозрачностью) — настройки остаются лёгкими.
+function fileToEmblem(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const S = 160, c = document.createElement('canvas'); c.width = c.height = S;
+      const k = Math.min(S / img.width, S / img.height), w = img.width * k, h = img.height * k;
+      c.getContext('2d').drawImage(img, (S - w) / 2, (S - h) / 2, w, h);
+      URL.revokeObjectURL(url);
+      let out = c.toDataURL('image/png');
+      if (out.length > 90000) out = c.toDataURL('image/webp', 0.9);
+      resolve(out);
+    };
+    img.onerror = () => reject(new Error('Не получилось открыть картинку'));
+    img.src = url;
+  });
+}
+function openTeamModal() {
+  ui.team = { teamName: ui.settings.teamName, emblem: ui.settings.emblem ?? null, opponents: JSON.parse(JSON.stringify(ui.settings.opponents)) };
+  paintTeamModal();
+}
+function paintTeamModal() {
+  const t = ui.team;
+  const pick = (who) => `<label class="embpick" title="Загрузить эмблему">${emblem(who === 'us' ? t.emblem : t.opponents[who].emblem, who === 'us' ? t.teamName : t.opponents[who].name, 'lg')}
+    <input type="file" accept="image/*" hidden data-k="embFile" data-who="${who}"></label>`;
+  modal(`<h2>Команда и соперники</h2><p>Эмблемы показываются в табло, списках матчей и аналитике. Кликните по кружку, чтобы загрузить картинку (PNG, JPG, SVG).</p>
+    <div class="trow us">${pick('us')}<input data-k="teamName" value="${esc(t.teamName)}" placeholder="Название команды">
+      ${t.emblem ? '<button class="btn sm ghost" data-a="embDel" data-who="us">Убрать эмблему</button>' : ''}</div>
+    <h3 style="margin:18px 0 8px;font-size:12px;color:var(--smoke);text-transform:uppercase;letter-spacing:.06em">Соперники</h3>
+    <div class="tlist">${t.opponents.map((o, i) => `<div class="trow">${pick(i)}<input data-k="oppName" data-i="${i}" value="${esc(o.name)}" placeholder="Название">
+      ${o.emblem ? `<button class="btn sm ghost" data-a="embDel" data-who="${i}">Убрать</button>` : ''}
+      <button class="rowdel" style="opacity:1" data-a="oppDel" data-i="${i}" title="Удалить соперника">${icon('i-x')}</button></div>`).join('') || '<p class="muted">Соперников пока нет.</p>'}</div>
+    <button class="btn sm" data-a="oppAdd" style="margin-top:8px">${icon('i-plus')}Соперник</button>
+    <div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div>`);
 }
 
 // ---------- Видео ----------
@@ -1875,7 +1926,7 @@ async function createMatch(opponentId) {
 const H = {
   tab: d => { ui.tab = d.tab; if (d.tab === 'video' && !ui.clips) api('GET', '/api/clips').then(c => { ui.clips = c; if (ui.tab === 'video') paintSide(); }).catch(() => {}); render(); },
   help: openHelp,
-  modalClose: () => { modal(''); ui.fEdit = null; },
+  modalClose: () => { modal(''); ui.fEdit = null; ui.team = null; },
   modalBg: (d, e) => { if (e.target.classList.contains('modal-bg')) modal(''); },
   pickFile: () => $('fileInput').click(),
   view: d => { court.setView(d.v); document.querySelectorAll('[data-a=view]').forEach(b => b.classList.toggle('on', b.dataset.v === d.v)); },
@@ -1899,6 +1950,19 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  teamModal: () => openTeamModal(),
+  embDel: d => { if (d.who === 'us') ui.team.emblem = null; else delete ui.team.opponents[+d.who].emblem; paintTeamModal(); },
+  oppAdd: () => { ui.team.opponents.push({ id: newId(), name: '' }); paintTeamModal(); },
+  oppDel: d => { const o = ui.team.opponents[+d.i]; if (o.name && !confirm(`Удалить соперника «${o.name}»? Его матчи останутся.`)) return; ui.team.opponents.splice(+d.i, 1); paintTeamModal(); },
+  teamSave: () => call(async () => {
+    const t = ui.team;
+    const opponents = t.opponents.filter(o => o.name.trim()).map(o => ({ ...o, name: o.name.trim() }));
+    ui.settings = await api('PUT', '/api/settings', { teamName: t.teamName.trim() || 'Мы', emblem: t.emblem, opponents });
+    ui.team = null; modal('');
+    ui.matches = await api('GET', '/api/matches');
+    if (ui.match) setMatch(await api('GET', `/api/matches/${ui.match.id}`));
+    toast('Команда сохранена');
+  }),
   rallyStar: d => { const r = rallyByKey(d.k); if (r) updateEvent(r.plays[0].i, { star: r.star ? undefined : true, ...(r.star && { note: undefined }) }); },
   rallyNote: d => { const r = rallyByKey(d.k); if (!r) return; const note = prompt('Заметка к моменту (например, «лучший блок»):', r.note); if (note !== null) updateEvent(r.plays[0].i, { note: note.trim() || undefined }); },
   rallyClips: () => playList(rallySegments()),
@@ -2085,6 +2149,10 @@ document.addEventListener('change', e => {
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (k === 'fskill') { ui.filter.skill = v; render(); }
   if (k === 'rFilter') { ui.rFilter = v; paintSide(); }
+  if (k === 'embFile' && e.target.files[0]) {
+    const who = e.target.dataset.who;
+    fileToEmblem(e.target.files[0]).then(src => { if (who === 'us') ui.team.emblem = src; else ui.team.opponents[+who].emblem = src; paintTeamModal(); }).catch(err => toast(err.message, true));
+  }
   if (k === 'fp') { ui.filter.p = v; render(); }
   if (k === 'system') call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { system: v })));
   if (k === 'trackSets') { ui.trackSets = v; store.set('trackSets', v); render(); }
@@ -2116,6 +2184,8 @@ document.addEventListener('change', e => {
   if (k === 'etempo') updateEvent(ui.edit, { tempo: v });
 });
 document.addEventListener('input', e => {
+  if (ui.team && e.target.dataset.k === 'teamName') ui.team.teamName = e.target.value;
+  if (ui.team && e.target.dataset.k === 'oppName') ui.team.opponents[+e.target.dataset.i].name = e.target.value;
   if (e.target.dataset.k === 'setH') {
     ui.setH = Number(e.target.value);
     e.target.previousElementSibling.querySelector('b').textContent = ui.setH.toFixed(1) + ' м';

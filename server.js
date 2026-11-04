@@ -120,7 +120,7 @@ async function listMatches(full, mode) {
   const replayFn = mode === 'quick' ? replayQuick : replay;
   return matches.map(m => {
     const st = replayFn(m);
-    return { id: m.id, opponent: m.opponent, created: m.created, setsWon: st.setsWon, over: st.matchOver, videos: m.videos || [], events: m.events.length };
+    return { id: m.id, opponentId: m.opponentId, opponent: m.opponent, created: m.created, setsWon: st.setsWon, over: st.matchOver, videos: m.videos || [], events: m.events.length };
   });
 }
 

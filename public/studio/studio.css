@@ -92,6 +92,10 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 
 /* ---------- Верхняя панель ---------- */
 .brand { display: flex; align-items: center; gap: 10px; font-size: 14px; padding-right: 6px; }
+.brandmark { width: 28px; height: 28px; border-radius: 7px; flex: none; }
+.bname { display: flex; flex-direction: column; line-height: 1.1; }
+.bname b { font-size: 13.5px; font-weight: 600; letter-spacing: -.005em; }
+.bname small { font-size: 11px; color: var(--smoke); }
 .logo { width: 12px; height: 12px; border-radius: 3px; transform: rotate(45deg); background: var(--coral); box-shadow: 0 0 16px rgb(255 99 99 / .55); }
 .match-pick { height: 32px; padding: 0 12px; border-radius: 8px; color: var(--ash); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .match-pick:hover { background: var(--well); color: var(--text); }
@@ -494,3 +498,17 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .rowstar.on { color: var(--amber); }
 .rowstar:hover { background: rgb(240 200 90 / .14); color: var(--amber); }
 .rl .note { display: block; margin-top: 3px; font-style: normal; font-size: 11.5px; color: var(--amber); }
+
+/* Эмблемы команд */
+.emb { width: 24px; height: 24px; border-radius: 50%; object-fit: contain; background: var(--well); flex: none; display: inline-grid; place-items: center; }
+.emb.ini { color: #fff; font: 700 10px var(--font); letter-spacing: .02em; }
+.emb.sm { width: 22px; height: 22px; }
+.emb.lg { width: 44px; height: 44px; font-size: 15px; }
+.scoreboard .team .emb { width: 26px; height: 26px; }
+.teamcard { display: flex; align-items: center; gap: 12px; }
+.teamcard .grow { flex: 1; min-width: 0; } .teamcard small { display: block; color: var(--smoke); font-size: 11.5px; }
+.trow { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.trow input:not([type=file]) { flex: 1; }
+.embpick { cursor: pointer; border-radius: 50%; transition: box-shadow .12s; }
+.embpick:hover { box-shadow: 0 0 0 2px var(--sky); }
+.tlist { max-height: 46vh; overflow-y: auto; }
