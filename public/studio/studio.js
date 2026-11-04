@@ -904,7 +904,13 @@ function sideEvents() {
   if (ui.insertAt !== null) html += `<div class="banner">${icon('i-insert')}<span class="grow">Вставка: новые касания встают перед событием №${ui.insertAt + 1}</span><button class="btn sm" data-a="insertOff">Готово</button></div>`;
   if (ui.playlist) html += `<div class="banner" style="color:var(--mint);background:var(--us-bg)">${icon('i-clip')}<span class="grow">Клипы: ${ui.playlist.k + 1} из ${ui.playlist.items.length}</span><button class="btn sm" data-a="stopClips">Стоп</button></div>`;
   html += `<div class="seg evseg"><button class="${ui.evView === 'rallies' ? 'on' : ''}" data-a="evView" data-v="rallies">Розыгрыши</button><button class="${ui.evView === 'events' ? 'on' : ''}" data-a="evView" data-v="events">Все события</button></div>`;
-  if (ui.evView === 'rallies') return html + `<p class="muted" style="margin:4px 2px 8px">Клик — видео и 3D на этот розыгрыш · PgUp / PgDn — соседний</p><div class="evlist">${sideRallies()}</div>`;
+  if (ui.evView === 'rallies') {
+    const fr = filteredRallies().filter(r => r.t0 != null);
+    return html + `<div class="filters"><select data-k="rFilter">${Object.entries(RFILTER).map(([k, v]) => `<option value="${k}" ${(ui.rFilter ?? 'all') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="filters"><button class="btn sm" data-a="rallyClips" ${fr.length ? '' : 'disabled'} style="flex:1">${icon('i-clip')}Смотреть подряд (${fr.length})</button>
+        <button class="btn sm" data-a="exportClips" ${fr.length ? '' : 'disabled'} title="Склеить эти розыгрыши в один видеофайл">⤓ Нарезка mp4</button></div>
+      <p class="muted" style="margin:4px 2px 8px">Клик — видео и 3D на этот розыгрыш · PgUp / PgDn — соседний · ☆ — в избранное</p><div class="evlist">${sideRallies()}</div>`;
+  }
   html += `<div class="filters">
     <select data-k="fskill"><option value="">Все навыки</option>${skills}</select>
     <select data-k="fp"><option value="">Все игроки</option>${people}</select>
@@ -915,7 +921,7 @@ function sideEvents() {
   for (const r of rows) {
     const setNo = r.ev.t === 'set' ? (r.pl?.set ?? null) : null;
     if (r.ev.t === 'set') { curSet++; items.push(`<div class="ev-div">Партия ${curSet + 1}</div>`); }
-    const cls = [r.l.side || '', r.ev.t !== 'act' && r.ev.t !== 'pt' ? 'sys' : '', ui.edit === r.i ? 'sel' : '', ui.insertAt === r.i ? 'cursor' : '', ui.playlist?.items[ui.playlist.k]?.i === r.i ? 'playing' : ''].join(' ');
+    const cls = [r.l.side || '', r.ev.t !== 'act' && r.ev.t !== 'pt' ? 'sys' : '', ui.edit === r.i ? 'sel' : '', ui.insertAt === r.i ? 'cursor' : '', ui.playlist?.items[ui.playlist.k]?.i === r.i && r.i != null ? 'playing' : ''].join(' ');
     const ic = [r.ev.to || r.ev.from ? icon('i-pin') : '', r.ev.v && r.ev.v !== ui.activeVideo ? icon('i-film') : ''].join('');
     items.push(`<div class="ev has-del ${cls}" data-a="pickEv" data-i="${r.i}">
       <span class="t ${r.ev.vt == null ? 'none' : ''}">${r.ev.vt == null ? '—' : fmtShort(r.ev.vt)}</span>
@@ -972,7 +978,10 @@ function sideVideo() {
     <div class="dropzone" data-a="pickFile">${icon('i-upload')}<b>Добавить видео</b>Перетащите файл сюда или в любое место окна. Подойдёт любой формат: что не играет браузер (H.265/HEVC с iPhone, ProRes, AVI…), FFmpeg сам переведёт в H.264. Файл копируется в data/videos.</div>
     ${ups ? `<h3>Загрузка</h3><div class="vlist">${ups}</div>` : ''}
     ${ui.match ? `<h3>В этом матче</h3><div class="vlist">${inMatch.map(item).join('') || '<p class="muted">Нет привязанных видео. Если матч снят несколькими файлами — привяжите все.</p>'}</div>` : ''}
-    <h3>Библиотека</h3><div class="vlist">${rest.map(item).join('') || '<p class="muted">Пусто.</p>'}</div>`;
+    <h3>Библиотека</h3><div class="vlist">${rest.map(item).join('') || '<p class="muted">Пусто.</p>'}</div>
+    <h3>Нарезки лучших моментов</h3><div class="vlist">${(ui.clips ?? []).map(c => `<div class="vitem"><span class="th">${icon('i-clip')}</span>
+      <span style="min-width:0"><b title="${esc(c.file)}">${esc(c.file)}</b><small>${mb(c.size)} · data/clips</small></span>
+      <span class="acts2"><a class="ibtn" href="${c.url}" download title="Скачать">⤓</a><a class="ibtn" href="${c.url}" target="_blank" title="Открыть">${icon('i-play')}</a></span></div>`).join('') || '<p class="muted">Пока нет. В «Событиях → Розыгрыши» отметьте ★ и нажмите «Нарезка mp4».</p>'}</div>`;
 }
 
 function sideMatch() {
@@ -1490,7 +1499,8 @@ function rallies() {
   const list = [...groups.values()].map(r => {
     const won = r.plays[0].won;
     const ts = r.plays.filter(p => p.vt != null).map(p => p.vt);
-    return { ...r, won, after: won == null ? null : [r.score[0] + (won ? 1 : 0), r.score[1] + (won ? 0 : 1)],
+    const head = ui.match.events[r.plays[0].i] ?? {};
+    return { ...r, won, star: !!head.star, note: head.note ?? '', after: won == null ? null : [r.score[0] + (won ? 1 : 0), r.score[1] + (won ? 0 : 1)],
       t0: ts.length ? Math.min(...ts) : null, t1: ts.length ? Math.max(...ts) : null, v: r.plays.find(p => p.v)?.v ?? null };
   });
   rallyCache = { m: ui.full, list, st0: new Map() };
@@ -1523,8 +1533,11 @@ function stepRally(dir) {
   const next = list[Math.max(0, Math.min(list.length - 1, k < 0 ? (dir > 0 ? 0 : list.length - 1) : k + dir))];
   pickRally(next.key);
 }
+// Фильтр розыгрышей: все / избранные / наши очки / их очки.
+const RFILTER = { all: 'Все', star: '★ Избранное', us: 'Наши очки', them: 'Их очки' };
+const filteredRallies = () => rallies().filter(r => ({ all: true, star: r.star, us: r.won === true, them: r.won === false })[ui.rFilter ?? 'all']);
 function sideRallies() {
-  const list = rallies();
+  const list = filteredRallies();
   let html = '', set = -1;
   for (const r of list) {
     if (r.set !== set) { set = r.set; html += `<div class="ev-div">Партия ${set + 1}</div>`; }
@@ -1532,8 +1545,10 @@ function sideRallies() {
     html += `<div class="${cls}" data-a="pickRally" data-k="${r.key}">
       <span class="t ${r.t0 == null ? 'none' : ''}">${r.t0 == null ? '—' : fmtShort(r.t0)}</span>
       <span class="sc">${r.after ? r.after.join(':') : '…'}</span>
-      <span class="body"><b>${r.won === true ? 'Очко нам' : r.won === false ? 'Очко им' : 'Идёт'}</b> · Р${r.rot} · ${r.weServe ? 'наша подача' : 'приём'}<small>${esc(rallySummary(r))}</small></span>
-      <button class="rowdel" data-a="rallyDel" data-k="${r.key}" title="Удалить розыгрыш целиком">${icon('i-x')}</button></div>`;
+      <span class="body"><b>${r.won === true ? 'Очко нам' : r.won === false ? 'Очко им' : 'Идёт'}</b> · Р${r.rot} · ${r.weServe ? 'наша подача' : 'приём'}<small>${esc(rallySummary(r))}</small>${r.note ? `<em class="note">${esc(r.note)}</em>` : ''}</span>
+      <span class="racts"><button class="rowstar ${r.star ? 'on' : ''}" data-a="rallyStar" data-k="${r.key}" title="${r.star ? 'Убрать из избранного' : 'В избранное (лучшие моменты)'}">${r.star ? '★' : '☆'}</button>
+      ${r.star ? `<button class="rowdel" data-a="rallyNote" data-k="${r.key}" title="Заметка">✎</button>` : ''}
+      <button class="rowdel" data-a="rallyDel" data-k="${r.key}" title="Удалить розыгрыш целиком">${icon('i-x')}</button></span></div>`;
   }
   return html || '<p class="muted">Розыгрышей пока нет.</p>';
 }
@@ -1751,23 +1766,34 @@ mini.addEventListener('pointerdown', e => {
 
 // Плейлист клипов: каждое событие с запасом 4 с до и 2 с после.
 const PRE = 4, POST = 2.5;
+// Плейлист: отрезки { start, end, v, i? (событие), key? (розыгрыш) } — проигрываются подряд.
 function startClips() {
-  const items = eventRows().filter(r => r.ev.vt != null && r.ev.v === ui.activeVideo).map(r => ({ i: r.i, vt: r.ev.vt }));
+  const items = eventRows().filter(r => r.ev.vt != null && r.ev.v === ui.activeVideo).map(r => ({ i: r.i, start: r.ev.vt - PRE, end: r.ev.vt + POST, v: r.ev.v }));
+  playList(items);
+}
+function rallySegments() {
+  return filteredRallies().filter(r => r.t0 != null && r.v).map(r => ({ key: r.key, start: Math.max(0, r.t0 - 2.5), end: r.t1 + 2.5, v: r.v }));
+}
+function playList(items) {
   if (!items.length) return;
   ui.playlist = { items, k: 0 };
-  ui.edit = items[0].i;
-  seekTo(items[0].vt - PRE);
-  video.play();
+  playItem(items[0]);
   render();
+}
+function playItem(it) {
+  if (it.v && it.v !== ui.activeVideo && ui.videos.some(v => v.id === it.v)) openVideo(it.v);
+  if (it.i != null) ui.edit = it.i;
+  if (it.key) { ui.focusRally = it.key; ui.pickedRally = true; }
+  seekTo(it.start);
+  video.play().catch(() => {});
 }
 video.addEventListener('timeupdate', () => {
   const pl = ui.playlist;
   if (!pl) return;
-  if (video.currentTime >= pl.items[pl.k].vt + POST) {
+  if (video.currentTime >= pl.items[pl.k].end) {
     pl.k++;
     if (pl.k >= pl.items.length) { ui.playlist = null; video.pause(); toast('Клипы закончились'); render(); return; }
-    ui.edit = pl.items[pl.k].i;
-    seekTo(pl.items[pl.k].vt - PRE);
+    playItem(pl.items[pl.k]);
     render();
   }
 });
@@ -1847,7 +1873,7 @@ async function createMatch(opponentId) {
 }
 
 const H = {
-  tab: d => { ui.tab = d.tab; render(); },
+  tab: d => { ui.tab = d.tab; if (d.tab === 'video' && !ui.clips) api('GET', '/api/clips').then(c => { ui.clips = c; if (ui.tab === 'video') paintSide(); }).catch(() => {}); render(); },
   help: openHelp,
   modalClose: () => { modal(''); ui.fEdit = null; },
   modalBg: (d, e) => { if (e.target.classList.contains('modal-bg')) modal(''); },
@@ -1873,6 +1899,21 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  rallyStar: d => { const r = rallyByKey(d.k); if (r) updateEvent(r.plays[0].i, { star: r.star ? undefined : true, ...(r.star && { note: undefined }) }); },
+  rallyNote: d => { const r = rallyByKey(d.k); if (!r) return; const note = prompt('Заметка к моменту (например, «лучший блок»):', r.note); if (note !== null) updateEvent(r.plays[0].i, { note: note.trim() || undefined }); },
+  rallyClips: () => playList(rallySegments()),
+  exportClips: () => {
+    const segs = rallySegments();
+    if (!segs.length) return;
+    const name = `${ui.settings.teamName} — ${ui.match.opponent}${ui.rFilter === 'star' ? ' лучшее' : ''}`;
+    toast(`Готовлю нарезку из ${segs.length} розыгрышей… это может занять минуту`);
+    call(async () => {
+      const r = await api('POST', '/api/clips', { name, segments: segs.map(sg => ({ video: sg.v, start: +sg.start.toFixed(2), end: +sg.end.toFixed(2) })) });
+      if (r.error) return toast(r.error, true);
+      ui.clips = await api('GET', '/api/clips');
+      toast(`Нарезка готова: ${r.file} — во вкладке «Видео»`);
+    });
+  },
   blockOff: () => { if (ui.draft) delete ui.draft.block; render(); },
   evView: d => { ui.evView = d.v; store.set('evView', d.v); paintSide(); },
   pickRally: d => pickRally(d.k),
@@ -2043,6 +2084,7 @@ document.addEventListener('change', e => {
   if (!k) return;
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (k === 'fskill') { ui.filter.skill = v; render(); }
+  if (k === 'rFilter') { ui.rFilter = v; paintSide(); }
   if (k === 'fp') { ui.filter.p = v; render(); }
   if (k === 'system') call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { system: v })));
   if (k === 'trackSets') { ui.trackSets = v; store.set('trackSets', v); render(); }

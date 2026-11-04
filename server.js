@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { replay } from './public/engine.js';
 import { replayQuick } from './public/quick-engine.js';
-import { hasFfmpeg, probe, plan, convert } from './media.js';
+import { hasFfmpeg, probe, plan, convert, cutHighlights } from './media.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -25,6 +25,7 @@ const TYPES = {
 };
 // Видеотека: файлы копируются сюда при загрузке (перетаскиванием в студии), список — в videos.json.
 const VIDEOS = path.join(DATA, 'videos');
+const CLIPS = path.join(DATA, 'clips'); // нарезки лучших моментов
 const VIDEO_EXT = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv']);
 
 await mkdir(DATA, { recursive: true });
@@ -204,6 +205,26 @@ async function api(req, url) {
     if (video.status === 'processing') enqueue(video.id);
     return video;
   }
+  // Нарезка лучших моментов в один mp4: { name, segments: [{ video, start, end }] } → { url }.
+  if (route === 'POST /api/clips') {
+    if (!hasFfmpeg()) return { error: 'Для нарезки нужен FFmpeg — запустите start.bat с интернетом один раз' };
+    const { name, segments } = await readBody(req);
+    const list = await readJson(videosFile, []);
+    const segs = (segments || []).map(sg => ({ ...sg, v: list.find(v => v.id === sg.video) })).filter(sg => sg.v && sg.end > sg.start)
+      .map(sg => ({ file: path.join(VIDEOS, sg.v.file), start: +sg.start, end: +sg.end }));
+    if (!segs.length) return { error: 'Нет отрезков с видео' };
+    await mkdir(CLIPS, { recursive: true });
+    const safe = String(name || 'нарезка').replace(/[^\p{L}\p{N} _.—-]+/gu, '').replace(/ {2,}/g, ' ').trim().slice(0, 60) || 'нарезка';
+    const file = `${safe} ${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.mp4`;
+    await cutHighlights(segs, path.join(CLIPS, file), CLIPS);
+    return { url: '/clips/' + encodeURIComponent(file), file };
+  }
+  if (route === 'GET /api/clips') {
+    await mkdir(CLIPS, { recursive: true });
+    const files = (await readdir(CLIPS)).filter(f => f.endsWith('.mp4'));
+    return Promise.all(files.map(async f => ({ file: f, url: '/clips/' + encodeURIComponent(f), size: (await stat(path.join(CLIPS, f))).size }))).then(a => a.sort((x, y) => y.file.localeCompare(x.file)));
+  }
+
   const vm = url.pathname.match(/^\/api\/videos\/([a-z0-9]+)$/);
   if (vm && req.method === 'PATCH') {
     const patch = await readBody(req);
@@ -332,8 +353,8 @@ async function prepareVideo(id) {
 }
 
 // Видео отдаём кусками (Range): без этого браузер не умеет перематывать.
-async function sendVideo(req, res, name) {
-  const file = path.join(VIDEOS, path.basename(name));
+async function sendVideo(req, res, name, dir = VIDEOS) {
+  const file = path.join(dir, path.basename(name));
   const { size } = await stat(file);
   const type = TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream';
   const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
@@ -359,6 +380,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify(result));
     }
     if (url.pathname.startsWith('/media/')) return sendVideo(req, res, decodeURIComponent(url.pathname.slice(7)));
+    if (url.pathname.startsWith('/clips/')) return sendVideo(req, res, decodeURIComponent(url.pathname.slice(7)), CLIPS);
     const file = path.join(PUBLIC, url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname));
     if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
     const data = await readFile(file);

@@ -71,3 +71,24 @@ export async function convert(src, dst, info, mode, onProgress) {
   });
   if (code !== 0) throw new Error(err.split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 300));
 }
+
+// Нарезка лучших моментов: каждый отрезок перекодируем (точный старт с любого кадра) и склеиваем в один mp4.
+// segments: [{ file, start, end }] (секунды). onProgress — доля 0…1.
+export async function cutHighlights(segments, out, tmpDir, onProgress) {
+  const { writeFile, unlink } = await import('node:fs/promises');
+  const parts = [];
+  for (const [k, sg] of segments.entries()) {
+    const part = `${tmpDir}/part-${Date.now()}-${k}.mp4`;
+    const { code, err } = await run(['-hide_banner', '-y', '-ss', String(Math.max(0, sg.start)), '-to', String(sg.end), '-i', sg.file,
+      '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p',
+      '-r', '30', '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-b:a', '160k', '-movflags', '+faststart', part]);
+    if (code !== 0) throw new Error(err.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300));
+    parts.push(part);
+    onProgress?.((k + 1) / (segments.length + 1));
+  }
+  const list = `${tmpDir}/list-${Date.now()}.txt`;
+  await writeFile(list, parts.map(f => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+  const { code, err } = await run(['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', out]);
+  for (const f of [...parts, list]) await unlink(f).catch(() => {});
+  if (code !== 0) throw new Error(err.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300));
+}

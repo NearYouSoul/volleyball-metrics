@@ -485,3 +485,12 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .rgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .rz { display: grid; gap: 3px; color: var(--smoke); font-size: 11.5px; }
 .rz select { width: 100%; }
+
+/* Избранные моменты */
+.rl { grid-template-columns: 44px 44px minmax(0, 1fr) auto; }
+.racts { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.rowstar { width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 6px; color: var(--smoke); font-size: 15px; line-height: 1; opacity: 0; transition: opacity .12s; }
+.rl:hover .rowstar, .rowstar.on { opacity: 1; }
+.rowstar.on { color: var(--amber); }
+.rowstar:hover { background: rgb(240 200 90 / .14); color: var(--amber); }
+.rl .note { display: block; margin-top: 3px; font-style: normal; font-size: 11.5px; color: var(--amber); }
