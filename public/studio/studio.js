@@ -1266,6 +1266,7 @@ function openHelp() {
       ${k(['Tab'], 'быстро к следующей подаче (×3), пробел — стоп')}
       ${k(['PgUp', 'PgDn'], 'предыдущий / следующий розыгрыш (видео и 3D)')}
       ${k([',', '.'], 'кадр назад / вперёд')}
+      ${k(['[', ']'], 'скорость видео: медленнее / быстрее')}
       ${k(['1', '…', '6'], 'выбрать игрока по номеру зоны')}
       ${k(['A', 'S', 'D', 'F', 'G', 'H'], 'группа: подача, приём, пас, атака, защита/блок, ошибка')}
       ${k(['Q', 'W', 'E', 'R', 'T', 'Y'], 'действие в группе (подсказка на кнопке)')}
@@ -1910,12 +1911,38 @@ function replayTick() {
 }
 requestAnimationFrame(replayTick);
 
+// ---------- Скорость видео: выпадающее меню (много вариантов замедления) ----------
+// В режиме синхронизации своя скорость (запоминается отдельно) — обычно медленнее.
+const SPEEDS = [0.1, 0.2, 0.25, 0.33, 0.4, 0.5, 0.6, 0.75, 0.9, 1, 1.25, 1.5, 2];
+const curRate = () => (ui.sync ? ui.syncRate : ui.rate);
+const fmtRate = r => `${String(+r.toFixed(2)).replace('.', ',')}×`;
+function setSpeed(r) {
+  if (ui.sync) { ui.syncRate = r; store.set('syncRate', r); } else ui.rate = r;
+  if (!ui.ff) video.playbackRate = r;
+  paintSpeed();
+}
+function paintSpeed() {
+  const r = curRate();
+  $('speedVal').textContent = fmtRate(r);
+  $('speedBtn').classList.toggle('slow', r < 1);
+  $('speedPop').innerHTML = `<div class="sp-h">Скорость${ui.sync ? ' <small>в синхронизации</small>' : ''}</div>`
+    + [...SPEEDS].reverse().map(v => `<button data-a="speed" data-v="${v}" class="${Math.abs(v - r) < 1e-3 ? 'on' : ''}">${fmtRate(v)}${v === 1 ? '<small>обычная</small>' : ''}</button>`).join('');
+}
+const closeSpeed = () => $('speedPop').classList.remove('on');
+// Шаг скорости с клавиатуры: [ — медленнее, ] — быстрее.
+function stepSpeed(dir) {
+  const r = curRate(), i = SPEEDS.findIndex(v => v >= r - 1e-3);
+  const next = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? SPEEDS.length - 1 : i) + dir))];
+  setSpeed(next); toast('Скорость ' + fmtRate(next));
+}
+document.addEventListener('pointerdown', e => { if (!e.target.closest('#speed')) closeSpeed(); });
+
 // ---------- Синхронизация с видео ----------
 function setSync(on) {
   ui.sync = on; store.set('sync', on);
   ui.anchor = null; ui.loops = 0;
   if (video.src) video.playbackRate = on ? ui.syncRate : ui.rate;
-  document.querySelectorAll('[data-a=speed]').forEach(b => b.classList.toggle('on', +b.dataset.v === video.playbackRate));
+  paintSpeed();
   paintSyncUi();
   toast(on ? 'Синхронизация: Пробел — стоп-кадр на касании, Tab — к следующей подаче' : 'Синхронизация выключена');
 }
@@ -2171,7 +2198,8 @@ const H = {
   seek: d => seekTo(video.currentTime + Number(d.d)),
   frame: d => { video.pause(); seekTo(video.currentTime + Number(d.d) / 25); },
   vzoom: d => zoomAt(+d.d > 0 ? 1.25 : 0.8, vstage.clientWidth / 2, vstage.clientHeight / 2),
-  speed: d => { const r = Number(d.v); if (ui.sync) { ui.syncRate = r; store.set('syncRate', r); } else ui.rate = r; video.playbackRate = r; document.querySelectorAll('[data-a=speed]').forEach(b => b.classList.toggle('on', b.dataset.v === d.v)); },
+  speed: d => { setSpeed(Number(d.v)); closeSpeed(); },
+  speedMenu: () => { const pop = $('speedPop'); if (pop.classList.contains('on')) return closeSpeed(); paintSpeed(); pop.classList.add('on'); },
   layout: d => setLayout(d.v),
   hintToggle: () => { store.set('hintOpen', !store.get('hintOpen', false)); paintHud(); },
   sel: d => { pauseForInput(); ui.sel = ui.sel === d.id ? null : d.id; render(); },
@@ -2538,6 +2566,8 @@ document.addEventListener('keydown', e => {
   }
   if (e.ctrlKey || e.metaKey) { if (e.code === 'KeyZ') { e.preventDefault(); undo(); } return; }
   const c = e.code;
+  if (c === 'BracketLeft' || c === 'BracketRight') { stepSpeed(c === 'BracketLeft' ? -1 : 1); return; }
+  if (c === 'Escape' && $('speedPop').classList.contains('on')) { closeSpeed(); return; }
   if (c === 'Space') {
     e.preventDefault();
     if (e.repeat) return;
@@ -2637,6 +2667,7 @@ window.studio = { ui, court, rallies, ballKeys, ballAt, replayPlayers, repaint: 
 // ---------- Старт ----------
 setLayout(store.get('layout', 'split'));
 paintSyncUi();
+paintSpeed();
 $('viewport').style.setProperty('--split', store.get('split', 58) + '%');
 call(async () => {
   await loadAll();
