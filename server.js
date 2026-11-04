@@ -125,7 +125,7 @@ async function listMatches(full, mode) {
   const replayFn = mode === 'quick' ? replayQuick : replay;
   return matches.map(m => {
     const st = replayFn(m);
-    return { id: m.id, opponentId: m.opponentId, opponent: m.opponent, created: m.created, setsWon: st.setsWon, over: st.matchOver, videos: m.videos || [], events: m.events.length };
+    return { id: m.id, opponentId: m.opponentId, opponent: m.opponent, tournament: m.tournament ?? null, created: m.created, setsWon: st.setsWon, over: st.matchOver, videos: m.videos || [], events: m.events.length };
   });
 }
 
@@ -161,7 +161,7 @@ async function api(req, url) {
     });
   }
   if (route === 'POST /api/matches') {
-    const { opponentId, mode, format } = await readBody(req);
+    const { opponentId, mode, format, tournament } = await readBody(req);
     // Формат матча (до скольки побед, до скольки очков) — запоминаем как последний выбранный.
     const fmt = format && Number.isInteger(format.sets) && format.sets >= 1 && format.sets <= 5 ? { sets: format.sets, points: +format.points || 25, tiebreak: +format.tiebreak || 15 } : null;
     if (fmt) await serial(async () => { const st = await readSettings(); st.lastFormat = fmt; await writeJson(settingsFile, st); });
@@ -171,6 +171,8 @@ async function api(req, url) {
       ...(mode === 'quick' && { mode }),
       opponentId,
       ...(fmt && { format: fmt }),
+      // Турнир: явно выбранный или текущий из настроек — матчи с турнира группируются в аналитике.
+      ...((tournament ?? refs.settings.activeTournament) && { tournament: tournament ?? refs.settings.activeTournament }),
       opponent: refs.settings.opponents.find(o => o.id === opponentId)?.name || 'Соперник', // запасное имя, если соперника удалят
       created: new Date().toISOString(),
       roster: refs.roster.filter(p => p.active !== false), // копия состава на момент матча — только активные игроки
@@ -271,6 +273,7 @@ async function api(req, url) {
       if (Array.isArray(patch.videos)) match.videos = patch.videos;
       if (typeof patch.system === 'string') match.system = patch.system;
       if (typeof patch.preset === 'string') match.preset = patch.preset;
+      if (typeof patch.tournament === 'string') { if (patch.tournament) match.tournament = patch.tournament; else delete match.tournament; }
       // Роли на этот матч: { id игрока → роль }; пустая роль — как в команде.
       if (patch.roles && typeof patch.roles === 'object') match.roles = Object.fromEntries(Object.entries(patch.roles).filter(([, r]) => r));
       if (patch.format && Number.isInteger(patch.format.sets)) match.format = { sets: patch.format.sets, points: +patch.format.points || 25, tiebreak: +patch.format.tiebreak || 15 };

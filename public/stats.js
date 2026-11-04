@@ -21,7 +21,7 @@ const dirKey = d => (d === 1 || d === 5 || d === '1' || d === '5' ? 'back' : d =
 const OUT_COLOR = { us: '#59d499', them: '#ff6363', null: '#a0a3aa' };
 const REC_LABEL = { pp: '++', pm: '+−', p: '+', trans: 'Переход' };
 
-let F = { opp: 'all', match: null, set: 'all', player: 'all', rot: 'all', phase: 'all', skill: 'att', dots: true, heat: true, traj: false, setter: null, sort: 'points' };
+let F = { tour: 'all', opp: 'all', match: null, set: 'all', player: 'all', rot: 'all', phase: 'all', skill: 'att', dots: true, heat: true, traj: false, setter: null, sort: 'points' };
 let DATA = null;
 
 // ---------- Данные ----------
@@ -33,7 +33,7 @@ const sig = ms => ms.map(m => m.id + ':' + (m.events?.length ?? m.events)).join(
 
 function view() {
   const { matches, settings } = DATA;
-  const cands = matches.filter(m => F.opp === 'all' || m.opponentId === F.opp);
+  const cands = matches.filter(m => (F.opp === 'all' || m.opponentId === F.opp) && (F.tour === 'all' || (F.tour === 'none' ? !m.tournament : m.tournament === F.tour)));
   const hashM = location.hash.match(/m=([a-z0-9]+)/)?.[1];
   if (F.match === null) F.match = hashM && cands.some(m => m.id === hashM) ? hashM : cands[0]?.id ?? 'all';
   if (F.match !== 'all' && !cands.some(m => m.id === F.match)) F.match = 'all';
@@ -65,7 +65,9 @@ function filters(v) {
   const sel = (k, opts, label) => `<label>${label}<select data-f="${k}">${opts.map(([val, t]) => `<option value="${val}" ${String(F[k]) === String(val) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
   const maxSets = Math.max(0, ...rows.map(r => r.st.sets.length));
   const people = [...v.people].sort((a, b) => a.num - b.num);
+  const tours = settings.tournaments ?? [];
   return [
+    ...(tours.length ? [sel('tour', [['all', 'Все турниры'], ...tours.map(t => [t.id, t.name]), ['none', 'Без турнира']], 'Турнир')] : []),
     sel('opp', [['all', 'Все соперники'], ...settings.opponents.map(o => [o.id, o.name])], 'Соперник'),
     sel('match', [['all', `Все матчи (${cands.length})`], ...cands.map(m => [m.id, `${dt(m)} · ${m.opponent}`])], 'Матч'),
     sel('set', [['all', 'Все партии'], ...Array.from({ length: maxSets }, (_, i) => [i, `Партия ${i + 1}`])], 'Партия'),
@@ -395,6 +397,50 @@ function playersSection(v) {
     </div></section>`;
 }
 
+// ---------- Турниры: прогресс команды ----------
+function toursSection(v) {
+  const tours = v.settings.tournaments ?? [];
+  if (!tours.length) return '';
+  const stat = ms => {
+    const t = {}, pl = newPlayer();
+    let w = 0, l = 0;
+    for (const m of ms) {
+      const st = replay(m);
+      if (st.teams.all) addStats(t, st.teams.all);
+      for (const p of Object.values(st.players.all ?? {})) addStats(pl, p);
+      if (st.matchOver) st.setsWon.us > st.setsWon.them ? w++ : l++;
+    }
+    const so = t.sideout ?? { n: 0, won: 0 }, br = t.brk ?? { n: 0, won: 0 };
+    return { n: ms.length, w, l, so: so.n ? so.won / so.n : null, br: br.n ? br.won / br.n : null,
+      kp: pl.att.tot ? (pl.att.kill + pl.att.bo) / pl.att.tot : null, rr: recRating(pl.rec) };
+  };
+  const list = tours.map(t => ({ t, s: stat(DATA.matches.filter(m => m.tournament === t.id)) })).filter(x => x.s.n)
+    .sort((a, b) => (a.t.created ?? '').localeCompare(b.t.created ?? ''));
+  if (!list.length) return '';
+  const W = 900, H = 200, L = 34, B = 30;
+  const X = i => L + (list.length < 2 ? (W - L) / 2 : (i / (list.length - 1)) * (W - L - 90));
+  const Y = f => 12 + (1 - f) * (H - B - 12);
+  const labels = [];
+  const line = (key, color, name, max = 1) => {
+    const pts = list.map((x, i) => (x.s[key] == null ? null : [X(i), Y(x.s[key] / max)])).filter(Boolean);
+    if (pts.length) labels.push({ x: pts.at(-1)[0] + 8, y: pts.at(-1)[1] + 4, color, name });
+    return pts.length ? `<polyline fill="none" stroke="${color}" stroke-width="2.2" points="${pts.map(p => p.join(',')).join(' ')}"/>${pts.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="4" fill="${color}"/>`).join('')}` : '';
+  };
+  // Подписи линий справа — раздвигаем, чтобы не налезали друг на друга.
+  const placeLabels = () => { labels.sort((a, b) => a.y - b.y); for (let i = 1; i < labels.length; i++) labels[i].y = Math.max(labels[i].y, labels[i - 1].y + 14); return labels.map(l => `<text x="${l.x}" y="${l.y}" style="fill:${l.color}">${l.name}</text>`).join(''); };
+  const chart = `<svg viewBox="0 0 ${W} ${H}" class="dyn">
+    ${[0, 0.25, 0.5, 0.75, 1].map(f => `<line x1="${L}" x2="${W - 90}" y1="${Y(f)}" y2="${Y(f)}" stroke="rgb(255 255 255 / .06)"/><text x="${L - 6}" y="${Y(f) + 4}" text-anchor="end">${f * 100}%</text>`).join('')}
+    ${line('so', '#59d499', 'сайд-аут')}${line('br', '#63a1ff', 'брейк')}${line('kp', '#f0c85a', 'атака')}${line('rr', '#b59cff', 'приём /3', 3)}${placeLabels()}
+    ${list.map((x, i) => `<text x="${X(i)}" y="${H - 8}" text-anchor="middle">${esc(x.t.name.slice(0, 18))}</text>`).join('')}
+  </svg>`;
+  const rows = list.map(x => `<tr><td class="l">${esc(x.t.name)}</td><td>${x.s.n}</td><td>${x.s.w}:${x.s.l}</td>
+    <td>${x.s.so == null ? '–' : Math.round(x.s.so * 100) + '%'}</td><td>${x.s.br == null ? '–' : Math.round(x.s.br * 100) + '%'}</td>
+    <td>${x.s.kp == null ? '–' : Math.round(x.s.kp * 100) + '%'}</td><td>${x.s.rr == null ? '–' : x.s.rr.toFixed(2)}</td></tr>`).join('');
+  return `<section class="dsec" id="tours"><h2>Турниры: прогресс команды</h2><p class="sub">Как меняются главные показатели от турнира к турниру (по всем матчам турнира).</p>
+    <div class="panel flowchart">${chart}</div>
+    <div class="panel tw" style="margin-top:12px"><table class="t"><tr><th class="l">Турнир</th><th>Матчей</th><th>Победы:поражения</th><th>Сайд-аут</th><th>Брейк</th><th>Атака</th><th>Приём</th></tr>${rows}</table></div></section>`;
+}
+
 // ---------- Отрисовка ----------
 function render() {
   if (!DATA.matches.length) {
@@ -405,13 +451,13 @@ function render() {
   const v = view();
   document.getElementById('filters').innerHTML = filters(v);
   const y = scrollY;
-  $app.innerHTML = overview(v) + flow(v) + heatSection(v) + setterSection(v) + rotSection(v) + playersSection(v);
+  $app.innerHTML = overview(v) + flow(v) + heatSection(v) + setterSection(v) + rotSection(v) + playersSection(v) + toursSection(v);
   scrollTo(0, y);
 }
 
 document.addEventListener('change', e => {
   const f = e.target.dataset.f, tg = e.target.dataset.toggle;
-  if (f) { F[f] = e.target.value; if (f === 'opp') F.match = null; if (f === 'match' && e.target.value !== 'all') history.replaceState(null, '', '#m=' + e.target.value); render(); }
+  if (f) { F[f] = e.target.value; if (f === 'opp' || f === 'tour') F.match = null; if (f === 'match' && e.target.value !== 'all') history.replaceState(null, '', '#m=' + e.target.value); render(); }
   if (tg) { F[tg] = e.target.checked; render(); }
 });
 document.addEventListener('click', e => {

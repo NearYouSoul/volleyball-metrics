@@ -1037,7 +1037,7 @@ function sideVideo() {
 function sideMatch() {
   const m = ui.match, st = ui.st;
   const list = ui.matches.map(x => `<div class="mitem ${m?.id === x.id ? 'on' : ''}" data-a="open" data-id="${x.id}">${emblem(ui.settings.opponents.find(o => o.id === x.opponentId)?.emblem, x.opponent, 'sm')}
-    <span class="grow"><b>${esc(x.opponent)}</b><small>${new Date(x.created).toLocaleDateString('ru')} · событий ${x.events}${x.videos.length ? ' · видео ' + x.videos.length : ''}</small></span>
+    <span class="grow"><b>${esc(x.opponent)}</b><small>${new Date(x.created).toLocaleDateString('ru')}${x.tournament ? ' · ' + esc(ui.settings.tournaments?.find(t => t.id === x.tournament)?.name ?? '') : ''} · событий ${x.events}${x.videos.length ? ' · видео ' + x.videos.length : ''}</small></span>
     <span class="sc">${x.setsWon.us}:${x.setsWon.them}</span>
     <button class="rowdel" data-a="matchDel" data-id="${x.id}" title="Удалить матч">${icon('i-x')}</button></div>`).join('');
   const sys = m ? Object.entries(SYSTEMS).map(([k, v]) => `<option value="${k}" ${m.system === k ? 'selected' : ''}>${v}</option>`).join('') : '';
@@ -1048,6 +1048,11 @@ function sideMatch() {
         <span>Соперник</span><b>${esc(m.opponent)}</b>
         <span>Партии</span><b class="mono">${st.sets.map(s => `${s.us}:${s.them}`).join(', ') || '—'}</b>
         <span>Событий</span><b class="mono">${m.events.length}</b>
+      </div>
+      <div class="field" style="display:grid;gap:6px;margin-top:12px;font-size:12.5px;color:var(--smoke)">Турнир
+        <div style="display:flex;gap:6px"><select data-k="matchTour" style="flex:1"><option value="">— без турнира —</option>${(ui.settings.tournaments ?? []).map(t => `<option value="${t.id}" ${m.tournament === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
+        <button class="btn sm" data-a="tourNew" title="Новый турнир">＋</button></div>
+        <span>${ui.settings.activeTournament ? `Новые матчи попадают в «${esc(ui.settings.tournaments?.find(t => t.id === ui.settings.activeTournament)?.name ?? '')}»` : 'Новые матчи — без турнира'} · <a href="#" data-a="tourActive" style="color:var(--sky)">${ui.settings.activeTournament === m.tournament && m.tournament ? 'не добавлять новые сюда' : 'новые матчи — в этот турнир'}</a></span>
       </div>
       <div class="field" style="display:grid;gap:6px;margin-top:12px;font-size:12.5px;color:var(--smoke)">Формат матча
         <select data-k="matchFormat">${formatOptions(formatKey(m.format ?? formatOf(m)))}</select>
@@ -2043,6 +2048,22 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  tourNew: () => {
+    const name = prompt('Название турнира (например, «Кубок города, ноябрь»):');
+    if (!name?.trim()) return;
+    const t = { id: newId(), name: name.trim(), created: new Date().toISOString() };
+    call(async () => {
+      ui.settings = await api('PUT', '/api/settings', { tournaments: [...(ui.settings.tournaments ?? []), t], activeTournament: t.id });
+      if (ui.match) setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { tournament: t.id }));
+      toast(`Турнир «${t.name}» создан — новые матчи попадут в него`);
+    });
+  },
+  tourActive: (d, e) => {
+    e.preventDefault();
+    const cur = ui.match?.tournament ?? '';
+    const next = ui.settings.activeTournament === cur && cur ? '' : cur;
+    call(async () => { ui.settings = await api('PUT', '/api/settings', { activeTournament: next || null }); });
+  },
   timeout: d => { if (!live()) return; sendRaw({ t: 'timeout', side: d.side }); toast(`Тайм-аут ${d.side === 'us' ? 'наш' : 'соперника'} отмечен`); },
   statScope: d => { ui.statScope = d.v === 'all' ? 'all' : +d.v; paintSide(); },
   teamModal: () => openTeamModal(),
@@ -2304,6 +2325,7 @@ document.addEventListener('change', e => {
     f.rot = zoneOf[v]; // та же картина на площадке — теперь это Р по зоне нового связующего
     paintFormEditor();
   }
+  if (k === 'matchTour') call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { tournament: v })));
   if (k === 'matchFormat') { const format = pickFormat(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { format }))); }
   if (k === 'matchPreset') { const pr = presetById(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { preset: v, system: pr.system || ui.match.system }))); }
   if (k === 'eres') updateEvent(ui.edit, { res: v });
@@ -2451,3 +2473,14 @@ call(async () => {
 });
 // Дашборд и телефон могут менять данные — подтягиваем список матчей, когда окно снова в фокусе.
 addEventListener('focus', () => { if (!ui.busy) loadAll().then(() => ui.match && api('GET', `/api/matches/${ui.match.id}`)).then(m => { if (m) setMatch(m); render(); }).catch(() => {}); });
+
+// Ссылка на другой матч или розыгрыш в уже открытой студии (#m=…&r=…) — открываем без перезагрузки.
+addEventListener('hashchange', () => {
+  const id = location.hash.match(/m=([a-z0-9]+)/)?.[1];
+  const rk = location.hash.match(/r=(\d+:\d+)/)?.[1];
+  if (!id) return;
+  call(async () => {
+    if (ui.match?.id !== id) await openMatch(id);
+    if (rk) { ui.tab = 'events'; ui.evView = 'rallies'; pickRally(rk); }
+  });
+});
