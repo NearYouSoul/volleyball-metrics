@@ -122,7 +122,16 @@ function overview(v) {
       ${kpi('Подача', `${sum.serve.ace}<small>эйс</small> ${sum.serve.err}<small>ош</small>`, `сложных ${sum.serve.good} · всего ${sum.serve.tot}`)}
       ${kpi('Очки игроков', `${pts.points}<small>/ ${pts.errors} ош</small>`, `разница ${sgn(pts.diff)} · блок ${sum.blk.point}`)}
       ${kpi('Подарки', `${t.oppError || 0}<small>от них</small>`, `соперник забил ${t.oppKill || 0} · эйсов ${t.oppAce || 0}`)}
+      ${faultKpi(sum.faults)}
     </div></section>`;
+}
+
+// Ошибки игры по видам: сетка, заступ, четыре касания…
+const FAULT_SHORT = { net: 'сетка', line: 'заступ', reach: 'на их стороне', four: 'четыре касания', double: 'двойное', catch: 'захват', rot: 'переход', back: 'задняя линия', error: 'прочее' };
+function faultKpi(f = {}) {
+  const list = Object.entries(f).filter(([, n]) => n).sort((a, b) => b[1] - a[1]);
+  const n = list.reduce((a, [, k]) => a + k, 0);
+  return kpi('Ошибки игры', `${n}`, n ? list.map(([k, c]) => `${FAULT_SHORT[k] ?? k} ${c}`).join(' · ') : 'сетка, заступ, касания — не было');
 }
 
 // ---------- Ход партии: разница в счёте по розыгрышам ----------

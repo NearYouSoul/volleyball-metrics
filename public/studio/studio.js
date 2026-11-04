@@ -110,7 +110,7 @@ const GROUPS = {
   set: { label: 'Пас', icon: 's-set', key: 'D', acts: [['set', 'perfect', 'Идеальный', 'g'], ['set', 'good', 'Хороший', 'n'], ['set', 'poor', 'Неудобный', 'y'], ['set', 'over', 'Перевод к ним', 'n'], ['set', 'error', 'Ошибка паса', 'r']] },
   att: { label: 'Атака', icon: 's-att', key: 'F', acts: [['att', 'kill', 'Забил', 'g'], ['att', 'bo', 'От блока', 'g'], ['att', 'play', 'В игре', 'n'], ['att', 'error', 'Аут / сетка', 'r'], ['att', 'blocked', 'Заблокир.', 'r']] },
   def: { label: 'Защита и блок', icon: 's-dig', key: 'G', acts: [['dig', 'plus', 'Защита +', 'n'], ['dig', 'minus', 'Защита −', 'y'], ['dig', 'error', 'Не поднял', 'r'], ['blk', 'point', 'Блок: очко', 'g'], ['blk', 'touch', 'Касание блоком', 'y'], ['blk', 'out', 'Блок-аут', 'r']] },
-  fault: { label: 'Ошибка', icon: 's-fault', key: 'H', acts: [['fault', 'error', 'Сетка / заступ / касания', 'r']] },
+  fault: { label: 'Ошибка', icon: 's-fault', key: 'H', acts: [['fault', 'net', 'Сетка', 'r'], ['fault', 'line', 'Заступ', 'r'], ['fault', 'reach', 'На их стороне', 'r'], ['fault', 'four', 'Четыре касания', 'r'], ['fault', 'double', 'Двойное', 'r'], ['fault', 'catch', 'Захват', 'r'], ['fault', 'rot', 'Переход / расстановка', 'r'], ['fault', 'back', 'Атака задней линии', 'r'], ['fault', 'error', 'Прочее', 'r']] },
 };
 const ACT_KEYS = ['Q', 'W', 'E', 'R', 'T', 'Y'];
 const DISPLAY_SKILL = { serve: 'serve', rec: 'rec', set: 'set', att: 'att', def: 'dig', fault: null };
@@ -170,7 +170,7 @@ function sendAct(skill, res) {
   // На шаге паса кнопки качества не отправляют пас, а выбирают качество (кроме ошибки).
   if (skill === 'set' && c?.stage === 'set' && res !== 'error' && res !== 'over') { setQuality(res); return; }
   const p = actor(skill);
-  if (!p && skill !== 'team') return toast('Выберите игрока: клик по фишке на площадке или клавиши 1–6 (номер зоны)', true);
+  if (!p && skill !== 'team' && !(skill === 'fault' && res === 'rot')) return toast('Выберите игрока: клик по фишке на площадке или клавиши 1–6 (номер зоны)', true);
   const ev = stamp({ t: 'act', skill, res, p: skill === 'team' ? null : p });
   const t = ui.draft?.touch;
   if (t && (skill === t.kind || (t.kind === 'dig' && skill === 'blk'))) { ev.p = ui.sel ?? t.p; ev.to = t.at; if (t.from) ev.from = t.from; }
@@ -517,7 +517,7 @@ function stepPoint(c, p, right, hit) {
       if (hit?.hands === 'them') return blockMenu(p, c);
       if (p.y < NET) return openMenu(p, 0, [
         ['Атака в сетку', 'r', () => postAct({ skill: 'att', res: 'error', p: c.p, from: c.from, to: p })],
-        ['Четыре касания', 'r', () => postAct({ skill: 'fault', res: 'error', p: c.p })],
+        ['Четыре касания', 'r', () => postAct({ skill: 'fault', res: 'four', p: c.p })],
       ]);
       return attackLanding(p, right, c);
     }
@@ -962,7 +962,7 @@ function paintDock() {
   const serveDisabled = g === 'serve' && !st.rally.weServe;
   const cq = baseStage(ctx()) === 'set' ? (ctx().stage === 'await' ? ctx().set.q : ctx().q) : null;
   const acts = GROUPS[g].acts.map(([sk, res, label, cls], k) =>
-    `<button class="act ${cls} ${sk === 'set' && cq === res ? 'sel' : ''}" data-a="act" data-skill="${sk}" data-res="${res}" ${serveDisabled ? 'disabled' : ''}>${label}<span class="kbd">${ACT_KEYS[k]}</span></button>`).join('');
+    `<button class="act ${cls} ${sk === 'set' && cq === res ? 'sel' : ''}" data-a="act" data-skill="${sk}" data-res="${res}" ${serveDisabled ? 'disabled' : ''}>${label}${ACT_KEYS[k] ? `<span class="kbd">${ACT_KEYS[k]}</span>` : ''}</button>`).join('');
   const center = `<div>
     <div class="skills">${tabs}</div>
     <div class="acts">${acts}</div>

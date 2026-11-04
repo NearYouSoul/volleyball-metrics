@@ -181,7 +181,7 @@ const GROUPS = {
   def: p => ['Защита и блок', [btn('g', 'blk', 'point', 'Блок: очко', p), btn('n', 'dig', 'plus', 'Защита +', p), btn('y', 'dig', 'minus', 'Защита −', p),
     btn('y', 'blk', 'touch', 'Касание блоком', p), btn('r', 'blk', 'out', 'Блок-аут', p), btn('r', 'dig', 'error', 'Не поднял', p)]],
   set: p => ['Пас', [btn('g', 'set', 'perfect', 'Идеальный', p), btn('n', 'set', 'good', 'Хороший', p), btn('y', 'set', 'poor', 'Неудобный', p), btn('n', 'set', 'over', 'Перевод к ним', p), btn('r', 'set', 'error', 'Ошибка паса', p)]],
-  fault: p => ['Прочее', [btn('r', 'fault', 'error', 'Ошибка: сетка / заступ / касания', p)]],
+  fault: p => ['Ошибки игры', [btn('r', 'fault', 'net', 'Сетка', p), btn('r', 'fault', 'line', 'Заступ', p), btn('r', 'fault', 'reach', 'На их стороне', p), btn('r', 'fault', 'four', 'Четыре касания', p), btn('r', 'fault', 'double', 'Двойное', p), btn('r', 'fault', 'catch', 'Захват', p), btn('r', 'fault', 'rot', 'Переход', p), btn('r', 'fault', 'back', 'Атака задней линии', p), btn('r', 'fault', 'error', 'Прочее', p)]],
 };
 const MAIN_GROUP = { rec: 'rec', ours: 'att', their: 'def', serve: 'def' };
 

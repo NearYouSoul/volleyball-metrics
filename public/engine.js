@@ -16,7 +16,10 @@ export const ACTIONS = {
   att: { kill: 'us', bo: 'us', play: null, error: 'them', blocked: 'them' },
   blk: { point: 'us', touch: null, out: 'them' },
   dig: { plus: null, minus: null, over: null, error: 'them' },
-  fault: { error: 'them' },
+  // Ошибки игры (очко сопернику): касание сетки, заступ за центральную линию, игра на стороне соперника,
+  // четыре касания, двойное касание, захват (задержка мяча), переход / неправильная расстановка,
+  // атака или блок игрока задней линии; error — прочее (и старые записи без уточнения).
+  fault: { net: 'them', line: 'them', reach: 'them', four: 'them', double: 'them', catch: 'them', rot: 'them', back: 'them', error: 'them' },
   // over/back — статист вручную говорит, где мяч, без статистики игрока.
   team: { oppError: 'us', oppKill: 'them', oppAce: 'them', over: null, back: null },
 };
@@ -38,7 +41,11 @@ export const LABELS = {
   att: { kill: 'Атака: забил', bo: 'Атака: блок-аут', play: 'Атака в игру', error: 'Атака: аут/сетка', blocked: 'Атака: заблокирован' },
   blk: { point: 'Блок: очко', touch: 'Блок: касание', out: 'Блок: блок-аут' },
   dig: { plus: 'Защита +', minus: 'Защита −', over: 'Защита: перекид', error: 'Защита: не поднял' },
-  fault: { error: 'Ошибка (сетка/заступ/касания)' },
+  fault: {
+    net: 'Ошибка: касание сетки', line: 'Ошибка: заступ за центральную линию', reach: 'Ошибка: игра на стороне соперника',
+    four: 'Ошибка: четыре касания', double: 'Ошибка: двойное касание', catch: 'Ошибка: захват (задержка мяча)',
+    rot: 'Ошибка: переход / расстановка', back: 'Ошибка: атака задней линии', error: 'Ошибка: прочее',
+  },
   team: { oppError: 'Ошибка соперника', oppKill: 'Соперник забил', oppAce: 'Эйс соперника', over: 'Мяч ушёл к ним', back: 'Мяч у нас' },
 };
 
@@ -57,6 +64,7 @@ export const newPlayer = () => ({
   blk: { point: 0, touch: 0, out: 0 },
   dig: { tot: 0, plus: 0, minus: 0, over: 0, err: 0 },
   fault: 0,
+  faults: {}, // по видам: { net: 2, line: 1, … }
   court: { n: 0, us: 0 }, // розыгрышей на площадке и сколько из них выиграли — для «±, пока игрок на площадке»
 });
 
@@ -66,6 +74,7 @@ const newTeam = () => ({
   afterRec: { pp: counter(), pm: counter(), p: counter(), over: counter(), error: counter() },
   rot: {}, // по расстановкам: { 1: { so, brk, us, them } … }
   oppError: 0, oppKill: 0, oppAce: 0,
+  faults: {}, // наши ошибки игры по видам (и без игрока — например, переход)
   noStats: 0, // очки, внесённые без статистики
   links: {}, // связка «связующий > нападающий»
 });
@@ -247,7 +256,10 @@ export function replay(match, opts = {}) {
         eachPlayer(ev.p, p => { p.dig.tot++; p.dig[ev.res === 'error' ? 'err' : ev.res]++; });
         if (ev.res !== 'error' && ev.res !== 'over') rally.poss = { type: 'trans', q: ev.res, set: null };
         break;
-      case 'fault': eachPlayer(ev.p, p => p.fault++); break;
+      case 'fault':
+        eachPlayer(ev.p, p => { p.fault++; p.faults[ev.res] = (p.faults[ev.res] ?? 0) + 1; });
+        eachTeam(t => { t.faults[ev.res] = (t.faults[ev.res] ?? 0) + 1; });
+        break;
       case 'team':
         if (ev.res === 'oppAce') rally.rec = 'error';
         if (ev.res === 'back') rally.poss = { type: 'trans', q: null, set: null };

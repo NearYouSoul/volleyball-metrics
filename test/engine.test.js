@@ -176,3 +176,11 @@ test('второе касание переводом на их сторону �
   assert.equal(st.players.all.f.set.over, 1);
   assert.equal(st.set.us + st.set.them, 0); // розыгрыш продолжается
 });
+
+test('ошибки игры по видам: у игрока и у команды, всё — очко сопернику', () => {
+  const st = run([{ t: 'set', lineup, weServe: true }, act('fault', 'net', 'c'), act('fault', 'line', 'c'), act('fault', 'rot')]);
+  assert.equal(st.set.them, 3);
+  assert.equal(st.players.all.c.fault, 2);
+  assert.deepEqual(st.players.all.c.faults, { net: 1, line: 1 });
+  assert.deepEqual(st.teams.all.faults, { net: 1, line: 1, rot: 1 });
+});
