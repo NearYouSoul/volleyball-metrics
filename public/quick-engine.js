@@ -1,6 +1,6 @@
 // Быстрая статистика: фиксируем только, КТО закончил розыгрыш и ЧЕМ.
 // Как и в детальном режиме, матч — список событий; счёт и статистика пересчитываются из него.
-import { isSetOver, playerName, countSetsWon, isMatchOver } from './engine.js';
+import { isSetOver, playerName, countSetsWon, isMatchOver, formatOf, setTarget } from './engine.js';
 
 // side — кому очко; team — действие без игрока.
 export const RESULTS = {
@@ -30,12 +30,13 @@ export function replayQuick(match) {
   const sets = [], players = {}, teams = {}, log = [];
   const rallies = []; // { set, side, res, p, us, them } — для серий и хода партии
   let set = null;
+  const fmt = formatOf(match);
 
   for (const ev of match.events) {
     if (ev.t === 'set') {
       // Новая партия — только после окончания предыдущей и пока матч не выигран.
-      if ((set && !set.over) || isMatchOver(countSetsWon(sets))) continue;
-      set = { n: sets.length, us: 0, them: 0, serving: ev.weServe ? 'us' : 'them', over: false };
+      if ((set && !set.over) || isMatchOver(countSetsWon(sets), fmt)) continue;
+      set = { n: sets.length, us: 0, them: 0, serving: ev.weServe ? 'us' : 'them', over: false, target: ev.target || setTarget(sets.length, fmt) };
       sets.push(set);
       log.push({ text: `Партия ${set.n + 1} началась` });
       continue;
@@ -64,7 +65,7 @@ export function replayQuick(match) {
   }
 
   const setsWon = countSetsWon(sets);
-  return { sets, set, players, teams, log, rallies, setsWon, matchOver: isMatchOver(setsWon) };
+  return { sets, set, players, teams, log, rallies, setsWon, matchOver: isMatchOver(setsWon, fmt), format: fmt };
 }
 
 export function quickTotals(p) {

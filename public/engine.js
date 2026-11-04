@@ -68,21 +68,51 @@ const newTeam = () => ({
   links: {}, // связка «связующий > нападающий»
 });
 
-// Формат турнира: матч до двух побед в партиях (максимум 2:1), решающая третья партия — тай-брейк до 15.
-export const SETS_TO_WIN = 2;
-// n — номер партии с нуля.
-export const setTarget = n => (n === SETS_TO_WIN * 2 - 2 ? 15 : 25);
-export const isSetOver = s => Math.max(s.us, s.them) >= setTarget(s.n) && Math.abs(s.us - s.them) >= 2;
+// Форматы матча. sets — сколько партий нужно выиграть, points — до скольки партия, tiebreak — решающая партия.
+// По умолчанию — до двух побед (максимум 2:1), третья партия — тай-брейк до 15.
+export const FORMATS = {
+  bo3: { sets: 2, points: 25, tiebreak: 15, name: 'До 2 побед (25 · 25 · 15)' },
+  bo5: { sets: 3, points: 25, tiebreak: 15, name: 'До 3 побед (25 × 4 · 15)' },
+  one25: { sets: 1, points: 25, tiebreak: 25, name: 'Одна партия до 25' },
+  one15: { sets: 1, points: 15, tiebreak: 15, name: 'Одна партия до 15' },
+};
+export const DEFAULT_FORMAT = FORMATS.bo3;
+export const SETS_TO_WIN = DEFAULT_FORMAT.sets;
+export const formatOf = m => { const { sets, points, tiebreak } = DEFAULT_FORMAT; return { sets, points, tiebreak, ...(m?.format || {}) }; };
+export const formatName = f => Object.values(FORMATS).find(x => x.sets === f.sets && x.points === f.points && x.tiebreak === f.tiebreak)?.name
+  ?? `До ${f.sets} ${f.sets === 1 ? 'победы' : 'побед'}, партия до ${f.points}${f.sets > 1 ? `, решающая до ${f.tiebreak}` : ''}`;
+// n — номер партии с нуля; решающая — последняя возможная (2 × побед − 1).
+export const setTarget = (n, f = DEFAULT_FORMAT) => (n === f.sets * 2 - 2 ? f.tiebreak : f.points);
+// У партии своя цель (target): можно вручную поставить «эта партия до 15».
+export const isSetOver = s => Math.max(s.us, s.them) >= (s.target ?? setTarget(s.n)) && Math.abs(s.us - s.them) >= 2;
 export function countSetsWon(sets) {
   const won = side => sets.filter(s => s.over && (side === 'us' ? s.us > s.them : s.them > s.us)).length;
   return { us: won('us'), them: won('them') };
 }
-export const isMatchOver = setsWon => Math.max(setsWon.us, setsWon.them) >= SETS_TO_WIN;
+// Название партии для кнопок и заголовков: «Партия 2», «Партия 3 (до 15)», «Тай-брейк (до 15)».
+export function setTitle(n, f = DEFAULT_FORMAT, target = setTarget(n, f)) {
+  if (n === f.sets * 2 - 2 && f.sets > 1) return `Тай-брейк (до ${target})`;
+  return `Партия ${n + 1}${target !== 25 ? ` (до ${target})` : ''}`;
+}
+// Разбор выбора формата из списка: ключ FORMATS или «custom» — спросить параметры.
+export function pickFormat(key) {
+  if (FORMATS[key]) { const { sets, points, tiebreak } = FORMATS[key]; return { sets, points, tiebreak }; }
+  const sets = Math.max(1, Math.min(5, Number(prompt('Сколько партий нужно выиграть? (1–5)', '2')) || 2));
+  const points = Math.max(5, Math.min(50, Number(prompt('До скольки очков партия?', '25')) || 25));
+  const tiebreak = sets > 1 ? Math.max(5, Math.min(50, Number(prompt('Решающая партия до?', '15')) || 15)) : points;
+  return { sets, points, tiebreak };
+}
+export const formatKey = f => Object.keys(FORMATS).find(k => FORMATS[k].sets === f?.sets && FORMATS[k].points === f?.points && FORMATS[k].tiebreak === f?.tiebreak) ?? (f ? 'custom' : 'bo3');
+export const formatOptions = sel => [...Object.entries(FORMATS).map(([k, v]) => [k, v.name]), ['custom', 'Своя настройка…']]
+  .map(([k, v]) => `<option value="${k}" ${sel === k ? 'selected' : ''}>${v}</option>`).join('');
+
+export const isMatchOver = (setsWon, f = DEFAULT_FORMAT) => Math.max(setsWon.us, setsWon.them) >= f.sets;
 
 // opts.system — схема игры ('5-1', '4-2', '6-2', 'hybrid'), влияет только на автоподстановку связующего.
 export function replay(match, opts = {}) {
   const system = opts.system || match.system || '5-1';
   const setters = new Set(match.roster.filter(p => p.setter).map(p => p.id));
+  const fmt = formatOf(match);
   const players = {}, teams = {}, sets = [], log = [], plays = [];
   let set = null, rally = null, rallyNo = 0;
 
@@ -232,12 +262,13 @@ export function replay(match, opts = {}) {
   match.events.forEach((ev, i) => {
     if (ev.t === 'set') {
       // Новая партия — только после окончания предыдущей и пока матч не выигран.
-      if ((set && !set.over) || isMatchOver(countSetsWon(sets))) return;
+      if ((set && !set.over) || isMatchOver(countSetsWon(sets), fmt)) return;
       const main = ev.setter && ev.lineup.includes(ev.setter) ? ev.setter : ev.lineup.find(id => setters.has(id)) ?? null;
       set = {
         n: sets.length, us: 0, them: 0, lineup: [...ev.lineup], start: [...ev.lineup],
         serving: ev.weServe ? 'us' : 'them', srv: ev.weServe ? 0 : -1, over: false,
         main, mainSlot: main ? ev.lineup.indexOf(main) : -1, flow: [], startIdx: i,
+        target: ev.target || setTarget(sets.length, fmt),
       };
       sets.push(set);
       newRally();
@@ -270,7 +301,7 @@ export function replay(match, opts = {}) {
   });
 
   const setsWon = countSetsWon(sets);
-  return { sets, set, rally, players, teams, log, plays, setsWon, matchOver: isMatchOver(setsWon) };
+  return { sets, set, rally, players, teams, log, plays, setsWon, matchOver: isMatchOver(setsWon, fmt), format: fmt };
 }
 
 export function playerName(match, id) {

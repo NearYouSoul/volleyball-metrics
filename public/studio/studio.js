@@ -1,7 +1,7 @@
 // Студия — десктопная программа для разбора матча по видео и детальной статистики.
 // Состояние матча, как и везде, вычисляет engine.js из списка событий на сервере;
 // здесь — только интерфейс: видео, 3D-площадка, ввод касаний, правка и вставка событий.
-import { replay, playerName, LABELS, ACTIONS, SKILLS } from '../engine.js';
+import { replay, playerName, LABELS, ACTIONS, SKILLS, setTitle, setTarget, formatOptions, formatKey, pickFormat, formatName, formatOf } from '../engine.js';
 import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { gradeAt, digRes, zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from '../quality.js';
@@ -476,8 +476,10 @@ function stepPoint(c, p, right, hit) {
       if (c.stage === 'their' && inNetBand(p)) { ui.draft = { ...ui.draft, block: { x: p.x, side: blockSide(p.x) } }; ui.blockHover = null; render(); return; }
       if (p.y >= NET) { if (c.stage === 'their') { ui.draft = { ...ui.draft, origin: p }; render(); } return; }
       if (!inCourtUs(p)) return postAct({ skill: 'team', res: 'oppError', p: null, to: p });
-      if (right) return postAct({ skill: 'team', res: c.stage === 'rec' ? 'oppAce' : 'oppKill', p: null, to: p });
-      return awaitPlayer('touch', p, nearest(p), { touchKind: c.stage === 'rec' ? 'rec' : 'dig', from: c.origin ?? null });
+      const lost = { skill: 'team', res: c.stage === 'rec' ? 'oppAce' : 'oppKill', p: null, to: p, ...(c.origin && { from: c.origin }) };
+      if (right) return postAct(lost);
+      // Один клик — касание (дальше выбираем игрока), двойной — соперник забил в эту точку (на приёме — эйс).
+      return singleOrDouble(p, () => awaitPlayer('touch', p, nearest(p), { touchKind: c.stage === 'rec' ? 'rec' : 'dig', from: c.origin ?? null }), () => { ui.draft = null; postAct(lost); });
     }
     case 'touch2': {
       const t = c.touch;
@@ -526,6 +528,17 @@ function attackLanding(p, right, c) {
   court.setPending({ to: p });
 }
 function clearLanding() { if (landing) { clearTimeout(landing.timer); landing = null; } }
+// Общий разбор одиночного / двойного клика по полу: одиночный ждёт ~0,3 с, не будет ли второго рядом.
+let pendingClick = null;
+function singleOrDouble(p, single, double) {
+  if (pendingClick && Math.hypot(pendingClick.p.x - p.x, pendingClick.p.y - p.y) < 1.2) {
+    clearTimeout(pendingClick.timer); pendingClick = null;
+    return double();
+  }
+  if (pendingClick) clearTimeout(pendingClick.timer);
+  pendingClick = { p, timer: setTimeout(() => { pendingClick = null; single(); }, DBL_MS) };
+  court.setPending({ to: p });
+}
 function blockMenu(p, c) {
   const at = { x: p.x, y: NET + 0.1 };
   openMenu(at, 2.9, [
@@ -802,7 +815,7 @@ function paintDock() {
     const n = st.sets.length;
     const over = st.matchOver;
     dock.innerHTML = `<div style="grid-column:1/-1"><div class="empty">${over ? `Матч окончен · ${st.setsWon.us}:${st.setsWon.them}. Можно разбирать по видео и править события.` : n ? `Партия ${n} окончена ${st.set.us}:${st.set.them}.` : 'Матч создан.'}
-      ${over ? '' : `<button class="btn sm primary" data-a="lineup" style="margin-left:10px">${n === 2 ? 'Тай-брейк (до 15)' : `Начать партию ${n + 1}`}</button>`}
+      ${over ? '' : `<button class="btn sm primary" data-a="lineup" style="margin-left:10px">Начать: ${setTitle(n, st.format)}</button>`}
       ${n ? `<button class="btn sm ghost" data-a="undo" style="margin-left:6px">${icon('i-undo')}Отменить последнее</button>` : ''}</div></div>`;
     return;
   }
@@ -977,6 +990,10 @@ function sideMatch() {
         <span>Партии</span><b class="mono">${st.sets.map(s => `${s.us}:${s.them}`).join(', ') || '—'}</b>
         <span>Событий</span><b class="mono">${m.events.length}</b>
       </div>
+      <div class="field" style="display:grid;gap:6px;margin-top:12px;font-size:12.5px;color:var(--smoke)">Формат матча
+        <select data-k="matchFormat">${formatOptions(formatKey(m.format ?? formatOf(m)))}</select>
+        <span>${esc(formatName(formatOf(m)))}</span>
+      </div>
       <div class="field" style="display:grid;gap:6px;margin-top:12px;font-size:12.5px;color:var(--smoke)">Пресет команды (расстановки)
         <select data-k="matchPreset">${presets().map(p => `<option value="${p.id}" ${curPreset().id === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
       </div>
@@ -986,7 +1003,7 @@ function sideMatch() {
       </div>
       <label class="toggle" style="margin-top:12px"><input type="checkbox" data-k="trackSets" ${ui.trackSets ? 'checked' : ''}><span>Отмечать каждый пас (статистика связующего)</span></label>
       <div class="btns" style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
-        ${!st.matchOver && (!st.set || st.set.over) ? `<button class="btn sm primary" data-a="lineup">Начать партию ${st.sets.length + 1}</button>` : ''}
+        ${!st.matchOver && (!st.set || st.set.over) ? `<button class="btn sm primary" data-a="lineup">Начать: ${setTitle(st.sets.length, st.format)}</button>` : ''}
         <a class="btn sm" href="stats.html#m=${m.id}" target="_blank">${icon('i-chart')}Дашборд матча</a>
       </div>
     </div>` : ''}
@@ -1049,14 +1066,14 @@ const AWAIT_HINT = { touch: 'Кто принял мяч?', setter: 'Кто па�
 const STEP_HINT = {
   await: c => `${AWAIT_HINT[c.kind]} Кликните <b>подсвеченного</b> ${who(ui.hoverPid ?? c.suggest)} или другого игрока · <span class="kbd">⏎</span> — подсвеченный${c.kind === 'setter' ? ` · приём: <b>${LABELS[c.touch.kind][c.res].split(' ').pop()}</b>` : ''}`,
   serve: c => `Подача ${who(c.p)}: клик на их половине — <b>в игру</b> · ПКМ — эйс / сложная · за линией или в сетку — ошибка`,
-  rec: () => `<b>Приём</b>: клик, куда пришла подача (или сразу по игроку) · ПКМ — эйс соперника`,
+  rec: () => `<b>Приём</b>: клик, куда пришла подача (или сразу по игроку) · <b>двойной клик — эйс</b> соперника в эту точку`,
   their: c => c.block
-    ? `<b>Блок ${{ left: 'слева', center: 'по центру', right: 'справа' }[c.block.side]}</b> · клик на их половине — откуда бьют · по нашей площадке — куда пришёл мяч · по <b>рукам</b> — результат блока · ПКМ — не подняли`
-    : `<b>Мяч у них</b>: ведите мышь по <b>сетке</b> — блок (клик ставит) · на их половине — откуда бьют · по нашей площадке — куда пришёл мяч`,
+    ? `<b>Блок ${{ left: 'слева', center: 'по центру', right: 'справа' }[c.block.side]}</b> · клик на их половине — откуда бьют · по нашей площадке — куда пришёл мяч, <b>двойной — забили нам</b> · по <b>рукам</b> — результат блока`
+    : `<b>Мяч у них</b>: ведите мышь по <b>сетке</b> — блок (клик ставит) · на их половине — откуда бьют · по нашей площадке — куда пришёл мяч, <b>двойной клик — забили нам</b>`,
   free: () => `<b>Мяч у нас</b>: клик, где первое касание`,
   touch2: c => `${who(c.touch.p)} — ${c.touch.kind === 'rec' ? 'приём' : 'защита'}. Клик — <b>куда пришёл мяч к пасующему</b> (оценка по зонам доводки) или сразу по пасующему · на их сторону — перекид`,
   set: c => `Пас ${who(c.p)}: клик — <b>откуда бьют</b> (или сразу по нападающему) · колесо — высота · на их сторону — скидка`,
-  att: c => `Атака ${who(c.p)}: ЛКМ на их площадке — <b>очко</b> · ПКМ — подняли · за линией — аут · по рукам — блок`,
+  att: c => `Атака ${who(c.p)}: клик на их площадке — <b>в игре</b>, <b>двойной — очко</b> · за линией — аут · по рукам — блок · ПКМ — меню`,
 };
 
 function render() {
@@ -1104,7 +1121,10 @@ function paintLineup() {
   const roster = [...ui.match.roster].sort((a, b) => a.num - b.num);
   const chosen = d.order.map(id => person(id));
   const setterOpts = chosen.map(p => `<option value="${p.id}" ${(d.setter ?? chosen.find(c => c.setter)?.id) === p.id ? 'selected' : ''}>${esc(playerName(ui.match, p.id))}${p.setter ? ' · связ.' : ''}</option>`).join('');
-  modal(`<h2>${n === 3 ? 'Тай-брейк (до 15)' : `Партия ${n}`} — ${esc(ui.match.opponent)}</h2>
+  const auto = setTarget(n - 1, ui.st.format);
+  modal(`<h2>${setTitle(n - 1, ui.st.format, d.target ?? auto)} — ${esc(ui.match.opponent)}</h2>
+    <div class="field">Партия до
+      <div class="seg">${[[null, `${auto} (по формату)`], ...[25, 21, 15].filter(x => x !== auto).map(x => [x, String(x)])].map(([v, t]) => `<button class="${(d.target ?? null) === v ? 'on' : ''}" data-a="ltarget" data-v="${v ?? ''}">${t}</button>`).join('')}</div></div>
     ${fromPreset}
     <p>${pl?.start?.length === 6 ? 'Или вручную: н' : 'Н'}ажимайте игроков <b>в порядке подачи</b>: 1 — подаёт первым. Повторное нажатие убирает.</p>
     <div class="grid">${roster.map(p => {
@@ -1121,7 +1141,9 @@ function paintLineup() {
 }
 
 async function openNewMatch() {
-  modal(`<h2>Новый матч</h2><p>С кем играем?</p>
+  modal(`<h2>Новый матч</h2>
+    <div class="field">Формат матча<select id="fmt">${formatOptions(formatKey(ui.settings.lastFormat))}</select></div>
+    <p style="margin-top:14px">С кем играем?</p>
     <div class="mlist">${ui.settings.opponents.map(o => `<div class="mitem" data-a="createMatch" data-id="${o.id}"><span class="grow"><b>${esc(o.name)}</b></span></div>`).join('') || '<p class="muted">Соперников пока нет.</p>'}</div>
     <div class="field">Новый соперник<div style="display:flex;gap:8px"><input id="newOpp" placeholder="Название команды" style="flex:1"><button class="btn primary" data-a="createNewOpp">Создать</button></div></div>
     <div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button></div>`);
@@ -1810,9 +1832,14 @@ async function openMatch(id) {
 
 // Новый матч. Если открыто видео — сразу привязываем его: обычно матч создают, уже открыв запись игры.
 async function createMatch(opponentId) {
+  const fmtSel = $('fmt')?.value;
+  if (fmtSel) ui.fmtSel = fmtSel;
   modal('');
   ui.insertAt = null; ui.edit = null; ui.sel = null; ui.pending = {}; ui.playlist = null;
-  setMatch(await api('POST', '/api/matches', { opponentId }));
+  const format = pickFormat(ui.fmtSel ?? formatKey(ui.settings.lastFormat));
+  ui.fmtSel = null;
+  setMatch(await api('POST', '/api/matches', { opponentId, format }));
+  ui.settings.lastFormat = format;
   ui.matches = await api('GET', '/api/matches');
   if (ui.activeVideo) { await linkVideo(ui.activeVideo); store.set('video.' + ui.match.id, ui.activeVideo); toast('Открытое видео привязано к новому матчу'); }
   recompute();
@@ -1944,12 +1971,13 @@ const H = {
     if (ld.fromRot) Object.assign(ld, lineupFromPreset(ld.fromRot, ld.weServe)); // кто подаёт — меняет порядок, но не расстановку
     paintLineup();
   },
+  ltarget: d => { ui.lineupDraft.target = d.v ? +d.v : null; paintLineup(); },
   lrot: d => { const ld = ui.lineupDraft; ld.fromRot = +d.v; Object.assign(ld, lineupFromPreset(ld.fromRot, ld.weServe)); paintLineup(); },
   lstart: () => {
     const d = ui.lineupDraft;
     const setter = d.order.includes(d.setter) ? d.setter : d.order.find(id => person(id).setter) ?? null;
     modal('');
-    sendRaw({ t: 'set', lineup: d.order, weServe: d.weServe, ...(setter && { setter }) });
+    sendRaw({ t: 'set', lineup: d.order, weServe: d.weServe, ...(setter && { setter }), ...(d.target && { target: d.target }) });
   },
   newMatch: openNewMatch,
   createMatch: d => call(() => createMatch(d.id)),
@@ -2039,6 +2067,7 @@ document.addEventListener('change', e => {
     f.rot = zoneOf[v]; // та же картина на площадке — теперь это Р по зоне нового связующего
     paintFormEditor();
   }
+  if (k === 'matchFormat') { const format = pickFormat(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { format }))); }
   if (k === 'matchPreset') { const pr = presetById(v); call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { preset: v, system: pr.system || ui.match.system }))); }
   if (k === 'eres') updateEvent(ui.edit, { res: v });
   if (k === 'ep') updateEvent(ui.edit, { p: v || null });

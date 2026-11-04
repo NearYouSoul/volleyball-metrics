@@ -155,12 +155,16 @@ async function api(req, url) {
     });
   }
   if (route === 'POST /api/matches') {
-    const { opponentId, mode } = await readBody(req);
+    const { opponentId, mode, format } = await readBody(req);
+    // Формат матча (до скольки побед, до скольки очков) — запоминаем как последний выбранный.
+    const fmt = format && Number.isInteger(format.sets) && format.sets >= 1 && format.sets <= 5 ? { sets: format.sets, points: +format.points || 25, tiebreak: +format.tiebreak || 15 } : null;
+    if (fmt) await serial(async () => { const st = await readSettings(); st.lastFormat = fmt; await writeJson(settingsFile, st); });
     const refs = await loadRefs();
     const match = {
       id: Date.now().toString(36),
       ...(mode === 'quick' && { mode }),
       opponentId,
+      ...(fmt && { format: fmt }),
       opponent: refs.settings.opponents.find(o => o.id === opponentId)?.name || 'Соперник', // запасное имя, если соперника удалят
       created: new Date().toISOString(),
       roster: refs.roster, // копия состава на момент матча
@@ -241,6 +245,7 @@ async function api(req, url) {
       if (Array.isArray(patch.videos)) match.videos = patch.videos;
       if (typeof patch.system === 'string') match.system = patch.system;
       if (typeof patch.preset === 'string') match.preset = patch.preset;
+      if (patch.format && Number.isInteger(patch.format.sets)) match.format = { sets: patch.format.sets, points: +patch.format.points || 25, tiebreak: +patch.format.tiebreak || 15 };
       await writeJson(file, match);
       return hydrate(match, await loadRefs());
     });

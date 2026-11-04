@@ -1,6 +1,6 @@
 // Пульт: экраны «Меню», «Состав», «Порядок подачи», «Матч».
 // Всё состояние матча вычисляет engine.js из списка событий, который хранится на сервере.
-import { replay, playerName, LABELS } from './engine.js';
+import { replay, playerName, LABELS, setTitle, formatOptions, formatKey, pickFormat } from './engine.js';
 import { SYSTEMS, ROLES, roleOf } from './court.js';
 
 const $app = document.getElementById('app');
@@ -138,6 +138,9 @@ async function loadSettingsView() {
 function viewPickOpponent() {
   return `
     <h1>С кем играем?</h1>
+    <h2>Формат матча</h2>
+    <select id="fmt" style="width:100%;padding:12px;border-radius:8px;background:rgb(255 255 255 / .05);color:#fff;border:0;font:inherit">${formatOptions(formatKey(ui.settings.lastFormat))}</select>
+    <h2>Соперник</h2>
     <div class="col">${ui.settings.opponents.map(o => `<button data-a="newMatch" data-id="${o.id}">${esc(o.name)}</button>`).join('')}</div>
     <h2>Новый соперник</h2>
     <div class="row"><input id="newOpp" placeholder="Название команды" style="flex:2"><button class="primary" data-a="newOpponentMatch">Добавить и начать</button></div>
@@ -147,7 +150,7 @@ function viewPickOpponent() {
 function viewLineup() {
   const n = ui.st.sets.length + 1;
   return `
-    <h1>${n === 3 ? 'Тай-брейк (до 15)' : `Партия ${n}`} — ${esc(ui.match.opponent)}</h1>
+    <h1>${setTitle(n - 1, ui.st.format)} — ${esc(ui.match.opponent)}</h1>
     <p class="hint">Нажимайте игроков <b>в порядке подачи</b>: 1 — подаёт первым. Повторное нажатие убирает.</p>
     <div class="grid3">${[...ui.match.roster].sort(byNum).map(p => {
       const k = ui.lineup.indexOf(p.id);
@@ -260,7 +263,7 @@ function viewSetOver() {
     <div>${matchOver ? `Матч окончен · сеты ${setsWon.us}:${setsWon.them}` : `Партия ${set.n + 1} окончена`}</div>
     <div class="big">${set.us} : ${set.them}</div>
     <div class="col">
-      ${matchOver ? '' : `<button class="primary" data-a="nextSet">${set.n === 1 ? 'Тай-брейк (до 15)' : 'Следующая партия'}</button>`}
+      ${matchOver ? '' : `<button class="primary" data-a="nextSet">${setTitle(set.n + 1, ui.st.format)}</button>`}
       <button data-a="undo">↶ Отменить последнее очко</button>
       <button data-a="home">${matchOver ? 'К матчам' : 'Выйти к матчам'}</button>
     </div></div></div>`;
@@ -335,7 +338,7 @@ const handlers = {
     ui.view = 'pickOpponent';
     render();
   },
-  newMatch: d => call(async () => { setMatch(await api('POST', '/api/matches', { opponentId: d.id })); prepareLineup(); }),
+  newMatch: d => { const format = pickFormat(document.getElementById('fmt')?.value ?? 'bo3'); call(async () => { setMatch(await api('POST', '/api/matches', { opponentId: d.id, format })); prepareLineup(); }); },
   newOpponentMatch: () => {
     const name = document.getElementById('newOpp').value.trim();
     if (!name) return alert('Введите название соперника');
@@ -345,7 +348,7 @@ const handlers = {
     const opp = { id: newId(), name };
     call(async () => {
       ui.settings = await api('PUT', '/api/settings', { ...ui.settings, opponents: [...ui.settings.opponents, opp] });
-      setMatch(await api('POST', '/api/matches', { opponentId: opp.id }));
+      setMatch(await api('POST', '/api/matches', { opponentId: opp.id, format: pickFormat(document.getElementById('fmt')?.value ?? 'bo3') }));
       prepareLineup();
     });
   },

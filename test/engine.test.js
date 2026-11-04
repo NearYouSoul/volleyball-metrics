@@ -139,3 +139,19 @@ test('приём «перекид»: мяч уходит к ним', () => {
   assert.equal(st.rally.phase, 'their');
   assert.equal(st.players.all.a.rec.over, 1);
 });
+
+test('форматы матча: до 3 побед, одиночная партия, ручная цель партии', () => {
+  const pts = (side, n) => Array.from({ length: n }, () => ({ t: 'pt', side }));
+  const bo5 = replay({ roster, format: { sets: 3, points: 25, tiebreak: 15 }, events: [
+    { t: 'set', lineup, weServe: true }, ...pts('us', 25), { t: 'set', lineup, weServe: true }, ...pts('us', 25),
+    { t: 'set', lineup, weServe: true }, ...pts('them', 25), { t: 'set', lineup, weServe: true }, ...pts('them', 25),
+    { t: 'set', lineup, weServe: true }, ...pts('us', 15),
+  ] });
+  assert.deepEqual(bo5.setsWon, { us: 3, them: 2 });
+  assert.equal(bo5.sets[4].target, 15);
+  assert.equal(bo5.matchOver, true);
+  const one = replay({ roster, format: { sets: 1, points: 25, tiebreak: 25 }, events: [{ t: 'set', lineup, weServe: true }, ...pts('us', 25)] });
+  assert.equal(one.matchOver, true);
+  const manual = replay({ roster, events: [{ t: 'set', lineup, weServe: true, target: 15 }, ...pts('us', 15)] });
+  assert.equal(manual.sets[0].over, true);
+});

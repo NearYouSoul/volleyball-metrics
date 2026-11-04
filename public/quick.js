@@ -2,7 +2,7 @@
 // Экраны: «Матчи», «Соперник», «Кто подаёт первым», «Матч».
 // На ноутбуке всё можно делать с клавиатуры: цифра — игрок, буква — результат, Backspace — отмена.
 import { replayQuick, RESULTS, PLAYER_POINTS, PLAYER_ERRORS } from './quick-engine.js';
-import { playerName, setTarget } from './engine.js';
+import { playerName, setTitle, formatOptions, formatKey, pickFormat } from './engine.js';
 
 const $app = document.getElementById('app');
 const ui = { view: 'home', matches: [], roster: [], settings: { teamName: 'Мы', opponents: [] }, match: null, st: null, sel: null, busy: false };
@@ -99,6 +99,8 @@ function viewPickOpponent() {
   return `
     <nav>${back('home', 'Матчи')}</nav>
     <h1 class="mt-6 text-[32px] leading-tight font-normal">С кем играем?</h1>
+    <label class="mt-4 grid gap-1.5 text-sm text-ash">Формат матча
+      <select id="fmt" class="field">${formatOptions(formatKey(ui.settings.lastFormat))}</select></label>
     <div class="mt-6 grid gap-2">
       ${ui.settings.opponents.map(o => `<button class="btn min-h-14 justify-start px-5 text-base" data-a="newMatch" data-id="${o.id}">${esc(o.name)}</button>`).join('')}
     </div>
@@ -114,7 +116,7 @@ function viewServeFirst() {
   return `
     <nav>${back('home', 'Матчи')}</nav>
     <p class="mt-6 text-sm text-ash">${esc(ui.settings.teamName)} против ${esc(ui.match.opponent)}</p>
-    <h1 class="mt-1 text-[32px] leading-tight font-normal">${n === 2 ? 'Тай-брейк до 15' : `Партия ${n + 1}`}</h1>
+    <h1 class="mt-1 text-[32px] leading-tight font-normal">${setTitle(n, ui.st.format)}</h1>
     <p class="mt-6 mb-3 text-ash">Кто подаёт первым?</p>
     <div class="grid grid-cols-2 gap-3">
       <button class="btn btn-primary min-h-24 flex-col gap-1 text-lg" data-a="startSet" data-v="1">Мы ${kbd('1')}</button>
@@ -137,7 +139,7 @@ function viewBoard() {
   return `
     <section class="surface px-5 pt-4 pb-5" aria-label="Счёт">
       <div class="flex items-center justify-between text-[13px] text-smoke">
-        <span>${set.n === 2 ? 'Тай-брейк' : `Партия ${set.n + 1}`}, до ${setTarget(set.n)}</span>
+        <span>${setTitle(set.n, ui.st.format, set.target).replace(/ \(до \d+\)/, '')}, до ${set.target}</span>
         <span class="num">${done || `сеты ${setsWon.us}:${setsWon.them}`}</span>
       </div>
       <div class="mt-3 grid grid-cols-2 gap-4">
@@ -207,7 +209,7 @@ function viewSetOver() {
       <button class="btn min-h-12 justify-between" data-a="undo">Отменить последнее очко ${kbd('⌫')}</button>`);
   }
   return box(`Партия ${set.n + 1} окончена`, `${set.us}:${set.them}`, `
-    <button class="btn btn-primary min-h-12 justify-between" data-a="nextSet">${set.n === 1 ? 'Тай-брейк до 15' : 'Следующая партия'} ${kbd('Enter')}</button>
+    <button class="btn btn-primary min-h-12 justify-between" data-a="nextSet">${setTitle(set.n + 1, ui.st.format)} ${kbd('Enter')}</button>
     <button class="btn min-h-12 justify-between" data-a="undo">Отменить последнее очко ${kbd('⌫')}</button>
     <button class="btn btn-ghost min-h-11" data-a="home">Выйти к списку матчей</button>`);
 }
@@ -237,7 +239,8 @@ async function openMatch(id) {
 }
 
 const createMatch = async opponentId => {
-  setMatch(await api('POST', '/api/matches', { opponentId, mode: 'quick' }));
+  const sel = document.getElementById('fmt')?.value ?? formatKey(ui.settings.lastFormat);
+  setMatch(await api('POST', '/api/matches', { opponentId, mode: 'quick', format: pickFormat(sel) }));
   ui.view = 'serveFirst';
 };
 
