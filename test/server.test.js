@@ -68,3 +68,21 @@ test('сервер: видео — загрузка и перемотка (Range
   // Нельзя выйти за пределы папки видео.
   assert.equal((await fetch(`${URL_}/media/..%2Froster.json`)).status, 404);
 });
+
+test('сервер: резервная копия, восстановление, корзина', async () => {
+  const m = (await api('POST', '/api/matches', { opponentId: 'x' })).json;
+  const b = (await api('POST', '/api/backups')).json;
+  assert.ok(b.name);
+  await api('DELETE', `/api/matches/${m.id}`);
+  const trash = (await api('GET', '/api/trash')).json;
+  const item = trash.find(t => t.id === m.id);
+  assert.ok(item);
+  assert.equal((await api('POST', `/api/trash/${encodeURIComponent(item.file)}/restore`)).json.ok, true);
+  assert.equal((await api('GET', `/api/matches/${m.id}`)).json.id, m.id);
+  // Файл копии: выгрузили, удалили матч, загрузили — матч вернулся.
+  const file = (await api('GET', '/api/backup/file')).json;
+  await api('DELETE', `/api/matches/${m.id}`);
+  assert.equal((await api('POST', '/api/backup/file', file)).json.ok, true);
+  assert.equal((await api('GET', `/api/matches/${m.id}`)).json.id, m.id);
+  assert.ok((await api('GET', '/api/backups')).json.length >= 2); // автокопия при запуске + ручная + перед восстановлением
+});

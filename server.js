@@ -81,6 +81,52 @@ function hydrate(match, { roster, settings }) {
   return { ...match, opponent: opp?.name ?? match.opponent, roster: [...snapshot, ...added] };
 }
 
+// ---------- Резервные копии ----------
+// Копия — один файл backup.json в data/backups/<дата>: состав, настройки и все матчи (без видео — оно большое).
+const BACKUPS = path.join(DATA, 'backups');
+async function snapshot() {
+  const files = (await readdir(DATA)).filter(f => /^match-[a-z0-9]+\.json$/.test(f));
+  const matches = (await Promise.all(files.map(f => readJson(path.join(DATA, f), null).catch(() => null)))).filter(Boolean);
+  return { roster: await readJson(rosterFile, []), settings: await readJson(settingsFile, {}), matches };
+}
+async function makeBackup(reason = 'авто') {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23); // с миллисекундами — две копии подряд не затрут друг друга
+  const dir = path.join(BACKUPS, stamp);
+  await mkdir(dir, { recursive: true });
+  const data = { ...(await snapshot()), reason, created: new Date().toISOString() };
+  await writeJson(path.join(dir, 'backup.json'), data);
+  // Храним последние 30 копий.
+  const all = (await readdir(BACKUPS)).sort();
+  for (const old of all.slice(0, Math.max(0, all.length - 30))) await import('node:fs/promises').then(fs => fs.rm(path.join(BACKUPS, old), { recursive: true, force: true }));
+  return { name: stamp, reason, matches: data.matches.length };
+}
+async function listBackups() {
+  await mkdir(BACKUPS, { recursive: true });
+  const names = (await readdir(BACKUPS)).sort().reverse();
+  return Promise.all(names.map(async n => {
+    const d = await readJson(path.join(BACKUPS, n, 'backup.json'), null).catch(() => null);
+    return { name: n, created: d?.created ?? null, reason: d?.reason ?? '', matches: d?.matches?.length ?? 0 };
+  }));
+}
+// Восстановление: состав и настройки — из копии; матчи — из копии, а лишние текущие уходят в корзину (не стираются).
+async function restoreSnapshot(data) {
+  await writeJson(rosterFile, data.roster ?? []);
+  await writeJson(settingsFile, data.settings ?? {});
+  const keep = new Set(data.matches.map(m => m.id));
+  for (const f of (await readdir(DATA)).filter(f => /^match-[a-z0-9]+\.json$/.test(f))) {
+    if (!keep.has(f.slice(6, -5))) await toTrash(path.join(DATA, f));
+  }
+  for (const m of data.matches) if (/^[a-z0-9]+$/.test(m.id)) await writeJson(matchFile(m.id), m);
+}
+// Автокопия раз в день: при запуске и потом каждый час проверяем, есть ли копия за сегодня.
+async function dailyBackup() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const list = await listBackups();
+    if (!list.some(b => b.name.startsWith(today))) { const b = await serial(() => makeBackup('авто')); console.log(`  Резервная копия: data/backups/${b.name}`); }
+  } catch (e) { console.error('  Резервная копия не получилась:', e.message); }
+}
+
 async function toTrash(file) {
   await mkdir(TRASH, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -182,6 +228,48 @@ async function api(req, url) {
       events: [],
     };
     return serial(async () => { await writeJson(matchFile(match.id), match); return hydrate(match, refs); });
+  }
+
+  // ---------- Резервные копии и корзина ----------
+  if (route === 'GET /api/backups') return listBackups();
+  if (route === 'POST /api/backups') return serial(() => makeBackup('ручная'));
+  // Весь набор данных одним файлом (перенести на другой ноутбук, сохранить в облако).
+  if (route === 'GET /api/backup/file') return { ...(await snapshot()), app: 'volleyball-metrics', exported: new Date().toISOString() };
+  if (route === 'POST /api/backup/file') {
+    const data = await readBody(req);
+    if (!data || !Array.isArray(data.matches) || !Array.isArray(data.roster)) return { error: 'Это не файл резервной копии' };
+    return serial(async () => { await makeBackup('перед восстановлением'); await restoreSnapshot(data); return { ok: true, matches: data.matches.length }; });
+  }
+  const bm = url.pathname.match(/^\/api\/backups\/([\w-]+)\/restore$/);
+  if (bm && req.method === 'POST') {
+    return serial(async () => {
+      const dir = path.join(BACKUPS, path.basename(bm[1]));
+      const data = await readJson(path.join(dir, 'backup.json'), null);
+      if (!data) return null;
+      await makeBackup('перед восстановлением');
+      await restoreSnapshot(data);
+      return { ok: true, matches: data.matches.length };
+    });
+  }
+  if (route === 'GET /api/trash') {
+    await mkdir(TRASH, { recursive: true });
+    const files = (await readdir(TRASH)).filter(f => /match-[a-z0-9]+\.json$/.test(f));
+    const items = await Promise.all(files.map(async f => {
+      const m = await readJson(path.join(TRASH, f), null).catch(() => null);
+      return m && { file: f, id: m.id, opponent: m.opponent, created: m.created, deleted: f.slice(0, 19), events: m.events?.length ?? 0, mode: m.mode ?? 'detail' };
+    }));
+    return items.filter(Boolean).sort((a, b) => b.file.localeCompare(a.file));
+  }
+  const tm = url.pathname.match(/^\/api\/trash\/([^/]+)\/restore$/);
+  if (tm && req.method === 'POST') {
+    return serial(async () => {
+      const f = path.basename(decodeURIComponent(tm[1]));
+      const id = f.match(/match-([a-z0-9]+)\.json$/)?.[1];
+      if (!id) return null;
+      if (await readJson(matchFile(id), null)) return { error: 'Матч с таким номером уже есть' };
+      await rename(path.join(TRASH, f), matchFile(id));
+      return { ok: true, id };
+    });
   }
 
   // ---------- Видеотека ----------
@@ -412,8 +500,11 @@ process.on('uncaughtException', e => console.error('  Ошибка (сервер
 // Подготовка видео прервалась (закрыли окно сервера) — продолжаем после запуска.
 for (const v of await readJson(videosFile, [])) if (v.status === 'processing' && hasFfmpeg()) enqueue(v.id);
 
+dailyBackup();
+setInterval(dailyBackup, 3600e3).unref();
+
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  Статистика волейбола запущена`);
+  console.log(`\n  Волей Метрика запущена`);
   console.log(`  Компьютер: http://localhost:${PORT}`);
   for (const ip of lanAddresses()) console.log(`  Телефон:   http://${ip}:${PORT}/`);
   console.log(`\n  QR-код для телефона — в «Настройках». Не закрывай это окно, пока идёт матч.\n`);

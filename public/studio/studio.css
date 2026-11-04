@@ -557,3 +557,12 @@ video { width: 100%; height: 100%; object-fit: contain; display: block; backgrou
 .tl-track .mk.to { background: var(--amber); top: 4px; width: 4px; }
 .tol { display: flex; gap: 10px; align-items: center; padding: 5px 8px; margin: 2px 0; border-radius: 7px; font-size: 12px; color: var(--amber); background: rgb(240 200 90 / .07); cursor: pointer; }
 .tol span { font: 12px var(--mono); color: var(--smoke); min-width: 34px; }
+
+/* Данные и копии */
+.dbtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.dbtns label.btn { cursor: pointer; }
+.modal .mh { margin: 18px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--smoke); }
+.dlist { max-height: 30vh; overflow-y: auto; display: grid; gap: 4px; }
+.drow { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: var(--panel-2); }
+.drow span { flex: 1; min-width: 0; } .drow b { display: block; font-weight: 500; font-size: 13px; } .drow small { color: var(--smoke); font-size: 11.5px; }
+.modal code { font: 12px var(--mono); color: var(--ash); }

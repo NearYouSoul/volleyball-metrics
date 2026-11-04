@@ -1083,6 +1083,8 @@ function sideMatch() {
     <h3>Зоны доводки</h3>
     <p class="muted">Оценка приёма и защиты ставится сама — по точке, куда мяч пришёл к пасующему. <button class="btn sm" data-a="zonesEditor" style="margin-top:8px">Настроить зоны ++ / +− / +</button></p>
     <h3>Команда</h3>
+    <div class="card teamcard" style="margin-bottom:8px">${icon('i-list')}<span class="grow"><b>Данные и резервные копии</b><small>копия каждый день · корзина удалённых матчей</small></span>
+      <button class="btn sm" data-a="dataModal">Открыть</button></div>
     <div class="card teamcard">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>в составе ${ui.roster.filter(p => p.active !== false).length} · в запасе ${ui.roster.filter(p => p.active === false).length} · соперников ${ui.settings.opponents.length}</small></span>
       <button class="btn sm" data-a="teamModal">Игроки, соперники, эмблемы</button></div>`;
 }
@@ -1551,6 +1553,39 @@ function paintTeamModal() {
       <button class="rowdel" style="opacity:1" data-a="oppDel" data-i="${i}" title="Удалить соперника">${icon('i-x')}</button></div>`).join('') || '<p class="muted">Соперников пока нет.</p>'}</div>
     <button class="btn sm" data-a="oppAdd" style="margin-top:8px">${icon('i-plus')}Соперник</button>
     <div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="teamSave">Сохранить</button></div></div>`);
+}
+
+
+// ---------- Данные: резервные копии и корзина ----------
+async function openDataModal() {
+  const [backups, trash] = await Promise.all([api('GET', '/api/backups'), api('GET', '/api/trash')]);
+  ui.dataView = { backups, trash };
+  paintDataModal();
+}
+function paintDataModal() {
+  const { backups, trash } = ui.dataView;
+  const when = iso => (iso ? new Date(iso).toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
+  modal(`<h2>Данные и резервные копии</h2>
+    <p>Копия — состав, настройки (пресеты, эмблемы, турниры) и все матчи. Делается сама раз в день (хранятся 30 последних),
+      лежит в <code>data/backups</code>. Видео в копию не входит — оно в <code>data/videos</code>.</p>
+    <div class="dbtns">
+      <button class="btn primary" data-a="bkMake">Сделать копию сейчас</button>
+      <button class="btn" data-a="bkDownload">⤓ Сохранить в файл</button>
+      <label class="btn">⤒ Восстановить из файла<input type="file" accept=".json,application/json" hidden data-k="bkFile"></label>
+    </div>
+    <h3 class="mh">Копии</h3>
+    <div class="dlist">${backups.map(b => `<div class="drow"><span><b>${when(b.created)}</b><small>${esc(b.reason)} · матчей ${b.matches}</small></span>
+      <button class="btn sm ghost" data-a="bkRestore" data-n="${b.name}">Восстановить</button></div>`).join('') || '<p class="muted">Копий пока нет.</p>'}</div>
+    <h3 class="mh">Корзина: удалённые матчи</h3>
+    <div class="dlist">${trash.map(t => `<div class="drow"><span><b>${esc(t.opponent)} · ${new Date(t.created).toLocaleDateString('ru')}</b><small>${t.mode === 'quick' ? 'быстрая' : 'детальная'} · событий ${t.events} · удалён ${esc(t.deleted.slice(0, 10))}</small></span>
+      <button class="btn sm" data-a="trRestore" data-f="${esc(t.file)}">Вернуть</button></div>`).join('') || '<p class="muted">Корзина пуста.</p>'}</div>
+    <div class="foot"><button class="btn primary" data-a="modalClose">Готово</button></div>`);
+}
+async function afterRestore(msg) {
+  await loadAll();
+  if (ui.match && ui.matches.some(m => m.id === ui.match.id)) setMatch(await api('GET', `/api/matches/${ui.match.id}`)); else { ui.match = null; ui.full = ui.st = null; }
+  await openDataModal();
+  toast(msg);
 }
 
 // ---------- Видео ----------
@@ -2048,6 +2083,20 @@ const H = {
   act: d => sendAct(d.skill, d.res),
   tempo: d => { ui.tempo = d.v; ui.setH = TEMPOS[d.v].h; render(); },
   menuPick: d => menuPick(+d.k),
+  dataModal: () => call(openDataModal),
+  bkMake: () => call(async () => { const b = await api('POST', '/api/backups'); await openDataModal(); toast(`Копия сделана: матчей ${b.matches}`); }),
+  bkDownload: () => call(async () => {
+    const data = await api('GET', '/api/backup/file');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+    a.download = `volleyball-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }),
+  bkRestore: d => {
+    if (!confirm('Восстановить данные из этой копии? Текущие данные сначала сохранятся отдельной копией, лишние матчи уйдут в корзину.')) return;
+    call(async () => { const r = await api('POST', `/api/backups/${d.n}/restore`); await afterRestore(`Восстановлено: матчей ${r.matches}`); });
+  },
+  trRestore: d => call(async () => { const r = await api('POST', `/api/trash/${encodeURIComponent(d.f)}/restore`); if (r?.error) return toast(r.error, true); await afterRestore('Матч возвращён'); }),
   tourNew: () => {
     const name = prompt('Название турнира (например, «Кубок города, ноябрь»):');
     if (!name?.trim()) return;
@@ -2290,6 +2339,16 @@ document.addEventListener('change', e => {
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (k === 'fskill') { ui.filter.skill = v; render(); }
   if (k === 'rFilter') { ui.rFilter = v; paintSide(); }
+  if (k === 'bkFile' && e.target.files[0]) {
+    const f = e.target.files[0];
+    if (!confirm(`Восстановить всё из файла «${f.name}»? Текущие данные сначала сохранятся отдельной копией.`)) return;
+    f.text().then(t => call(async () => {
+      let data; try { data = JSON.parse(t); } catch { return toast('Файл не читается — это не копия', true); }
+      const r = await api('POST', '/api/backup/file', data);
+      if (r.error) return toast(r.error, true);
+      await afterRestore(`Восстановлено из файла: матчей ${r.matches}`);
+    }));
+  }
   if (k === 'plRole' && ui.team) { const p = ui.team.roster[+e.target.dataset.i]; p.role = v; p.setter = v === 's'; }
   if (k === 'matchRole') {
     const roles = { ...(ui.match.roles ?? {}), [e.target.dataset.id]: v };
