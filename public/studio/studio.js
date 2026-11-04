@@ -27,7 +27,7 @@ const ui = {
   activeVideo: null, sub: null, uploads: [], playlist: null, resumeAfter: false, busy: false,
   trackSets: store.get('trackSets', true), view: 'persp',
   draft: null, moved: {}, movedKey: '', mouse: null, setH: null, menu: null, zones: null,
-  sync: store.get('sync', false), syncRate: store.get('syncRate', 0.75), loopLen: store.get('loopLen', 5), anchor: null, loops: 0, ff: false, rate: 1, manualPause: false,
+  sync: store.get('sync', false), syncRate: store.get('syncRate', 0.75), loopLen: store.get('loopLen', 5), seekStep: store.get('seekStep', 5), anchor: null, loops: 0, ff: false, rate: 1, manualPause: false,
   evView: store.get('evView', 'rallies'), focusRally: null,
 };
 
@@ -269,6 +269,11 @@ const tips = initTips({ get: () => store.get('tips', false), set: v => store.set
 function paintDetailBtn() { const b = $('detailBtn'); if (b) { const real = store.get('detail', 'real') === 'real'; b.classList.toggle('on', real); b.querySelector('b').textContent = real ? 'HD' : 'Lo'; } }
 court.setDetail(store.get('detail', 'real'));
 paintDetailBtn();
+// Настройки вида при запуске: сетка зон, ракурс камеры, пауза при вводе.
+if (!store.get('zonesOn', true)) { court.toggleZones(false); document.querySelector('[data-a=zones]')?.classList.remove('on'); }
+if (store.get('view3d', 'persp') !== 'persp') { const v = store.get('view3d', 'persp'); court.setView(v); document.querySelectorAll('[data-a=view]').forEach(b => b.classList.toggle('on', b.dataset.v === v)); }
+$('autoPause').checked = store.get('autoPause', true);
+$('autoPause').addEventListener('change', e => store.set('autoPause', e.target.checked));
 
 const inCourtUs = p => p.x >= 0 && p.x <= 9 && p.y >= 0 && p.y < NET;
 const inCourtThem = p => p.x >= 0 && p.x <= 9 && p.y >= NET && p.y <= 18;
@@ -1193,15 +1198,9 @@ function sideMatch() {
     </div>` : ''}
     <h3>Матчи <span class="grow"></span><button class="btn sm" data-a="newMatch">${icon('i-plus')}Новый</button></h3>
     <div class="mlist">${list || '<p class="muted">Матчей пока нет.</p>'}</div>
-    <h3>Расстановки команды</h3>
-    <p class="muted"><span class="tip-inline">Как команда стоит на приёме, на своей подаче и в защите — для каждой из Р1–Р6.</span><button class="btn sm" data-a="formEditor">Настроить расстановки</button></p>
-    <h3>Зоны доводки</h3>
-    <p class="muted"><span class="tip-inline">Оценка приёма и защиты ставится сама — по точке, куда мяч пришёл к пасующему.</span><button class="btn sm" data-a="zonesEditor">Настроить зоны ++ / + / −</button></p>
     <h3>Команда</h3>
-    <div class="card teamcard" style="margin-bottom:8px">${icon('i-list')}<span class="grow"><b>Данные и резервные копии</b><small>копия каждый день · корзина удалённых матчей</small></span>
-      <button class="btn sm" data-a="dataModal">Открыть</button></div>
-    <div class="card teamcard">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>в составе ${ui.roster.filter(p => p.active !== false).length} · в запасе ${ui.roster.filter(p => p.active === false).length} · соперников ${ui.settings.opponents.length}</small></span>
-      <button class="btn sm" data-a="teamModal">Игроки, форма, соперники</button></div>`;
+    <div class="card teamcard">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>состав, форма, расстановки, зоны доводки, данные — в настройках</small></span>
+      <button class="btn sm" data-a="settings" data-tab="team">Настройки</button></div>`;
 }
 
 // ---------- Таймлайн ----------
@@ -1279,7 +1278,7 @@ function render() {
 // Перерисовка открытого окна меняет только содержимое — без повторной анимации появления.
 function modal(html) {
   const box = $('modal').querySelector('.modal');
-  if (html && box) box.innerHTML = html;
+  if (html && box) { box.className = 'modal'; box.innerHTML = html; }
   else $('modal').innerHTML = html ? `<div class="modal-bg" data-a="modalBg"><div class="modal">${html}</div></div>` : '';
 }
 const modalOpen = () => !!$('modal').innerHTML;
@@ -1689,16 +1688,78 @@ function paintTeamModal() {
 }
 
 
+// ---------- Настройки: общие, плеер, 3D-площадка, команда, данные ----------
+// Одно окно с разделами слева (как в Figma / Adobe). Настройки вида запоминаются на этом компьютере,
+// настройки команды и данные — на сервере (общие для студии и пультов).
+const SET_TABS = [['general', 'Общие'], ['player', 'Плеер'], ['court', '3D-площадка'], ['team', 'Команда'], ['data', 'Данные']];
+const VIEW_NAMES = { persp: 'Перспектива', top: 'Сверху', behind: 'Из-за спины', side: 'Сбоку' };
+const LABEL_NAMES = { num: 'Номер', name: 'Имя', full: 'Номер и имя', none: 'Без подписи' };
+function openSettings(tab = ui.setTab ?? 'general') {
+  ui.setTab = tab;
+  if (tab === 'data') return call(async () => { await loadDataView(); paintSettings(); });
+  paintSettings();
+}
+const optRow = (title, sub, ctl) => `<div class="srow"><span class="grow"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span>${ctl}</div>`;
+const segCtl = (k, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button class="${String(cur) === String(v) ? 'on' : ''}" data-a="setOpt" data-k="${k}" data-v="${v}">${l}</button>`).join('')}</div>`;
+const switchCtl = (k, on) => `<label class="switch"><input type="checkbox" data-k="${k}" ${on ? 'checked' : ''}><i></i></label>`;
+function settingsBody(tab) {
+  if (tab === 'general') return `<h3 class="mh">Общие</h3>
+    ${optRow('Режим подсказок', 'Задержите курсор на кнопке — появится пояснение. То же — кнопка «?» в верхней панели.', switchCtl('optTips', tips.on))}
+    ${optRow('Стартовый экран при запуске', 'Последние матчи, новый матч, команда — вместо сразу открытого матча.', switchCtl('optStart', store.get('startScreen', true)))}
+    ${optRow('Обучение', 'Короткий тур по окну студии.', '<button class="btn sm" data-a="tourStart">Пройти снова</button>')}
+    ${optRow('Горячие клавиши', 'Все сочетания на одной странице. Клавиша ?', '<button class="btn sm" data-a="help">Открыть</button>')}`;
+  if (tab === 'player') return `<h3 class="mh">Плеер</h3>
+    ${optRow('Пауза при вводе', 'Видео останавливается, пока вводите касание; после конца розыгрыша продолжится само.', switchCtl('optAutoPause', $('autoPause').checked))}
+    ${optRow('Скорость в синхронизации', 'Режим «Синхр.»: видео идёт от касания к касанию на этой скорости.', segCtl('syncRate', ui.syncRate, [[0.5, '0,5×'], [0.75, '0,75×'], [1, '1×']]))}
+    ${optRow('Петля синхронизации', 'Если следующее касание не отмечено — через столько секунд видео вернётся к прошлому.', segCtl('loopLen', ui.loopLen, [[3, '3 с'], [5, '5 с'], [8, '8 с'], [12, '12 с']]))}
+    ${optRow('Перемотка стрелками ← →', 'С Shift — втрое дальше.', segCtl('seekStep', ui.seekStep, [[2, '2 с'], [5, '5 с'], [10, '10 с']]))}`;
+  if (tab === 'court') return `<h3 class="mh">3D-площадка</h3>
+    ${optRow('Детализация игроков', 'Реалистичные фигуры или простые человечки (легче для слабого компьютера). Кнопка HD/Lo на панели площадки.', segCtl('detail', store.get('detail', 'real'), [['real', 'Реалистичные'], ['simple', 'Простые']]))}
+    ${optRow('Подписи над игроками', '', segCtl('labelMode', store.get('labelMode', 'num'), Object.entries(LABEL_NAMES)))}
+    ${optRow('Вид при запуске', '', segCtl('view3d', store.get('view3d', 'persp'), Object.entries(VIEW_NAMES)))}
+    ${optRow('Сетка зон', 'Тонкие линии 3×3 м на площадке.', switchCtl('optZones', store.get('zonesOn', true)))}`;
+  if (tab === 'team') {
+    const act = ui.roster.filter(p => p.active !== false).length;
+    return `<h3 class="mh">Команда</h3>
+    <div class="card teamcard" style="margin-bottom:10px">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>в составе ${act} · в запасе ${ui.roster.length - act} · соперников ${ui.settings.opponents.length}</small></span></div>
+    ${optRow('Игроки, форма, соперники', 'Номера, имена, роли; цвета майки и шортов; эмблемы.', '<button class="btn sm" data-a="teamModal">Изменить</button>')}
+    ${optRow('Расстановки', 'Как команда стоит на приёме, на своей подаче и в защите — для каждой из Р1–Р6.', '<button class="btn sm" data-a="formEditor">Настроить</button>')}
+    ${optRow('Зоны доводки', 'Оценка приёма и защиты ++ / + / − по точке, куда мяч пришёл к пасующему.', '<button class="btn sm" data-a="zonesEditor">Настроить</button>')}`;
+  }
+  return `<h3 class="mh">Данные</h3>${dataBody()}`;
+}
+function paintSettings() {
+  const tab = ui.setTab;
+  modal(`<div class="setwin"><nav class="setnav"><h2>Настройки</h2>${SET_TABS.map(([k, l]) => `<button class="${k === tab ? 'on' : ''}" data-a="setTab" data-v="${k}">${l}</button>`).join('')}</nav>
+    <div class="setbody">${settingsBody(tab)}<div class="foot"><button class="btn primary" data-a="settingsClose">Готово</button></div></div></div>`);
+  $('modal').querySelector('.modal')?.classList.add('wide');
+}
+// Применить настройку вида (кнопки-сегменты в окне настроек).
+function applyOpt(k, v) {
+  if (k === 'syncRate') { if (ui.sync) setSpeed(+v); else { ui.syncRate = +v; store.set('syncRate', ui.syncRate); paintSpeed(); } }
+  if (k === 'loopLen') { ui.loopLen = +v; store.set('loopLen', ui.loopLen); paintSyncUi(); }
+  if (k === 'seekStep') { ui.seekStep = +v; store.set('seekStep', ui.seekStep); }
+  if (k === 'detail') { store.set('detail', v); court.setDetail(v); paintDetailBtn(); }
+  if (k === 'labelMode') { store.set('labelMode', v); court.setLabelMode(v); paintLabelBtn(); }
+  if (k === 'view3d') { store.set('view3d', v); H.view({ v }); }
+  paintSettings();
+}
+
 // ---------- Данные: резервные копии и корзина ----------
-async function openDataModal() {
+async function loadDataView() {
   const [backups, trash] = await Promise.all([api('GET', '/api/backups'), api('GET', '/api/trash')]);
   ui.dataView = { backups, trash };
-  paintDataModal();
 }
-function paintDataModal() {
+async function openDataModal() {
+  await loadDataView();
+  ui.setTab = 'data';
+  paintSettings();
+}
+function paintDataModal() { paintSettings(); }
+function dataBody() {
   const { backups, trash } = ui.dataView;
   const when = iso => (iso ? new Date(iso).toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '');
-  modal(`<h2>Данные и резервные копии</h2>
+  return `
     <p>Копия — состав, настройки (пресеты, эмблемы, турниры) и все матчи. Делается сама раз в день (хранятся 30 последних),
       лежит в <code>data/backups</code>. Видео в копию не входит — оно в <code>data/videos</code>.</p>
     <div class="dbtns">
@@ -1711,8 +1772,7 @@ function paintDataModal() {
       <button class="btn sm ghost" data-a="bkRestore" data-n="${b.name}">Восстановить</button></div>`).join('') || '<p class="muted">Копий пока нет.</p>'}</div>
     <h3 class="mh">Корзина: удалённые матчи</h3>
     <div class="dlist">${trash.map(t => `<div class="drow"><span><b>${esc(t.opponent)} · ${new Date(t.created).toLocaleDateString('ru')}</b><small>${t.mode === 'quick' ? 'быстрая' : 'детальная'} · событий ${t.events} · удалён ${esc(t.deleted.slice(0, 10))}</small></span>
-      <button class="btn sm" data-a="trRestore" data-f="${esc(t.file)}">Вернуть</button></div>`).join('') || '<p class="muted">Корзина пуста.</p>'}</div>
-    <div class="foot"><button class="btn primary" data-a="modalClose">Готово</button></div>`);
+      <button class="btn sm" data-a="trRestore" data-f="${esc(t.file)}">Вернуть</button></div>`).join('') || '<p class="muted">Корзина пуста.</p>'}</div>`;
 }
 async function afterRestore(msg) {
   await loadAll();
@@ -2312,6 +2372,10 @@ const H = {
   tourEnd: () => endTour(),
   tourStart: () => startTour(0),
   dataModal: () => call(openDataModal),
+  settings: d => openSettings(d.tab),
+  setTab: d => openSettings(d.v),
+  setOpt: d => applyOpt(d.k, d.v),
+  settingsClose: () => { modal(''); ui.dataView = null; },
   bkMake: () => call(async () => { const b = await api('POST', '/api/backups'); await openDataModal(); toast(`Копия сделана: матчей ${b.matches}`); }),
   bkDownload: () => call(async () => {
     const data = await api('GET', '/api/backup/file');
@@ -2568,6 +2632,10 @@ document.addEventListener('change', e => {
   if (!k) return;
   const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
   if (k === 'fskill') { ui.filter.skill = v; render(); }
+  if (k === 'optTips' && v !== tips.on) { tips.toggle(); }
+  if (k === 'optStart') store.set('startScreen', v);
+  if (k === 'optAutoPause') { $('autoPause').checked = v; store.set('autoPause', v); }
+  if (k === 'optZones') { store.set('zonesOn', v); court.toggleZones(v); document.querySelector('[data-a=zones]')?.classList.toggle('on', v); }
   if (k === 'rFilter') { ui.rFilter = v; paintSide(); }
   if (k === 'bkFile' && e.target.files[0]) {
     const f = e.target.files[0];
@@ -2655,7 +2723,7 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && ui.lineupDraft?.order.length === 6 && $('modal').querySelector('[data-a=lstart]')) H.lstart();
     return;
   }
-  if (e.ctrlKey || e.metaKey) { if (e.code === 'KeyZ') { e.preventDefault(); undo(); } return; }
+  if (e.ctrlKey || e.metaKey) { if (e.code === 'KeyZ') { e.preventDefault(); undo(); } if (e.code === 'Comma') { e.preventDefault(); openSettings(); } return; }
   const c = e.code;
   if (c === 'BracketLeft' || c === 'BracketRight') { stepSpeed(c === 'BracketLeft' ? -1 : 1); return; }
   if (c === 'Escape' && $('speedPop').classList.contains('on')) { closeSpeed(); return; }
@@ -2675,7 +2743,7 @@ document.addEventListener('keydown', e => {
   if (c === 'Tab' && video.src) { e.preventDefault(); toggleFF(); return; }
   if (c === 'PageUp' || c === 'PageDown') { e.preventDefault(); stepRally(c === 'PageUp' ? -1 : 1); return; }
   if (c === 'KeyL' && !e.shiftKey) { setSync(!ui.sync); return; }
-  if (c === 'ArrowLeft' || c === 'ArrowRight') { e.preventDefault(); seekTo(video.currentTime + (c === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 15 : 5)); return; }
+  if (c === 'ArrowLeft' || c === 'ArrowRight') { e.preventDefault(); seekTo(video.currentTime + (c === 'ArrowLeft' ? -1 : 1) * ui.seekStep * (e.shiftKey ? 3 : 1)); return; }
   if (c === 'Comma' || c === 'Period') { H.frame({ d: c === 'Comma' ? -1 : 1 }); return; }
   // Esc: сначала меню, потом незаконченный шаг, потом выбор/правка.
   if (c === 'Escape') {
