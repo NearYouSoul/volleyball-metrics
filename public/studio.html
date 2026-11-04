@@ -58,7 +58,7 @@
 
   <div class="app" id="app">
     <header class="topbar">
-      <a class="brand" href="/" title="На главную"><img class="brandmark" src="img/logo.svg" alt=""><span class="bname"><b>Волей Метрика</b><small>Студия</small></span></a>
+      <a class="brand" href="/" data-a="home" title="Стартовый экран: матчи, новый матч, команда (Ctrl+O)"><img class="brandmark" src="img/logo.svg" alt=""><span class="bname"><b>Волей Метрика</b><small>Студия</small></span></a>
       <button class="match-pick" id="matchPick" data-a="tab" data-tab="match"></button>
       <div class="scoreboard" id="score"></div>
       <div class="phase-pill" id="phase"></div>
@@ -150,6 +150,7 @@
   </div>
 
   <div class="drop-veil" id="dropVeil"><div><svg><use href="#i-upload"/></svg><b>Отпустите, чтобы добавить видео</b><span>Файл скопируется в папку программы data/videos</span></div></div>
+  <div id="home" class="home" hidden></div>
   <div id="modal"></div>
   <div class="toast" id="toast"></div>
   <input type="file" id="fileInput" accept="video/*,.mkv,.mov" multiple hidden>

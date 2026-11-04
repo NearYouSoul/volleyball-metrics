@@ -1339,6 +1339,72 @@ async function openNewMatch() {
   setTimeout(() => $('newOpp')?.focus(), 30);
 }
 
+// ---------- Стартовый экран (как в Figma / Adobe): продолжить, новый матч, недавние, все матчи ----------
+// Открывается при запуске (можно выключить в настройках), по клику на логотип и по Ctrl+O.
+// Ссылка прямо на матч (#m=…) открывает матч сразу, без стартового экрана.
+const HOME_VIEWS = [['recent', 'Главная', 'i-cube'], ['all', 'Все матчи', 'i-list'], ['team', 'Команда', 'i-users']];
+function greet() { const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; }
+const matchState = m => (m.over ? 'окончен' : m.events ? 'идёт' : 'не начат');
+function matchCard(m) {
+  const tour = m.tournament ? ui.settings.tournaments?.find(t => t.id === m.tournament)?.name : '';
+  const st = matchState(m);
+  return `<button class="hcard" data-a="homeOpen" data-id="${m.id}">
+    <span class="hc-top">${ourEmblem('lg')}<span class="hc-score">${m.setsWon?.us ?? 0}<i>:</i>${m.setsWon?.them ?? 0}</span>${oppEmblem(m, 'lg')}</span>
+    <span class="hc-name"><b>${esc(ui.settings.teamName)} — ${esc(m.opponent)}</b><small>${new Date(m.created).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })}${tour ? ' · ' + esc(tour) : ''}</small></span>
+    <span class="hc-meta"><span class="pill ${st === 'идёт' ? 'live' : st === 'окончен' ? 'done' : ''}">${st}</span><span>событий ${m.events}</span>${m.videos?.length ? `<span>${icon('i-film')} ${m.videos.length}</span>` : ''}</span>
+  </button>`;
+}
+function homeMain(view) {
+  const ms = [...(ui.matches ?? [])].sort((a, b) => b.created.localeCompare(a.created));
+  const q = (ui.homeQ || '').trim().toLowerCase();
+  const found = q ? ms.filter(m => (m.opponent || '').toLowerCase().includes(q) || (ui.settings.tournaments?.find(t => t.id === m.tournament)?.name || '').toLowerCase().includes(q)) : ms;
+  const last = ms.find(m => m.id === store.get('lastMatch', null)) ?? ms[0];
+  if (view === 'team') {
+    const act = ui.roster.filter(p => p.active !== false);
+    return `<div class="hhead"><h1>Команда</h1></div>
+      <div class="hteam">${ourEmblem('xl')}<span><b>${esc(ui.settings.teamName)}</b><small>в составе ${act.length} · в запасе ${ui.roster.length - act.length} · соперников ${ui.settings.opponents.length}</small></span></div>
+      <div class="hroster">${act.sort((a, b) => (+a.num || 99) - (+b.num || 99)).map(p => `<span class="hplayer"><b>${esc(p.num ?? '')}</b>${esc(p.name)}<small>${ROLES[roleOf(p)]?.name ?? ''}</small></span>`).join('') || '<p class="muted">Игроков пока нет.</p>'}</div>
+      <div class="hactions">
+        <button class="hact" data-a="homeSettings" data-tab="team">${icon('i-users')}<b>Состав, форма, расстановки</b><small>игроки, цвета формы, Р1–Р6, зоны доводки</small></button>
+        <button class="hact" data-a="homeSettings" data-tab="data">${icon('i-upload')}<b>Пакет команды</b><small>скачать или загрузить: состав, форма, расстановки, соперники</small></button>
+      </div>`;
+  }
+  if (view === 'all') {
+    // Все матчи — по турнирам (без турнира — отдельно), поиск по сопернику и турниру.
+    const groups = new Map();
+    for (const m of found) { const k = m.tournament ?? ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); }
+    return `<div class="hhead"><h1>Все матчи</h1><input class="hsearch" data-k="homeQ" placeholder="Поиск: соперник или турнир" value="${esc(ui.homeQ || '')}"><button class="btn primary" data-a="homeNew">${icon('i-plus')}Новый матч</button></div>
+      ${[...groups].map(([k, list]) => `<h3 class="hsec">${esc(k ? ui.settings.tournaments?.find(t => t.id === k)?.name ?? 'Турнир' : 'Без турнира')} <small>${list.length}</small></h3><div class="hgrid">${list.map(matchCard).join('')}</div>`).join('') || `<p class="muted">${q ? 'Ничего не нашлось.' : 'Матчей пока нет.'}</p>`}`;
+  }
+  return `<div class="hhead"><h1>${greet()}${ui.settings.teamName ? `, «${esc(ui.settings.teamName)}»` : ''}</h1><input class="hsearch" data-k="homeQ" placeholder="Поиск: соперник или турнир" value="${esc(ui.homeQ || '')}"></div>
+    <div class="hactions">
+      <button class="hact primary" data-a="homeNew">${icon('i-plus')}<b>Новый матч</b><small>выбрать соперника и формат</small></button>
+      ${last ? `<button class="hact" data-a="homeOpen" data-id="${last.id}">${icon('i-play')}<b>Продолжить</b><small>${esc(last.opponent)} · ${new Date(last.created).toLocaleDateString('ru')} · ${matchState(last)}</small></button>` : ''}
+      <button class="hact" data-a="homeVideo">${icon('i-film')}<b>Открыть видео</b><small>файл игры — в библиотеку программы</small></button>
+      <a class="hact" href="stats.html" target="_blank">${icon('i-chart')}<b>Аналитика</b><small>дашборд по всем матчам</small></a>
+    </div>
+    <h3 class="hsec">${q ? 'Найдено' : 'Недавние'} <small>${found.length}</small>${!q && ms.length > 8 ? '<button class="btn sm ghost" data-a="homeView" data-v="all">Все матчи</button>' : ''}</h3>
+    <div class="hgrid">${(q ? found : found.slice(0, 8)).map(matchCard).join('') || `<div class="hempty"><b>${q ? 'Ничего не нашлось' : 'Матчей пока нет'}</b><small>${q ? 'Попробуйте другое название.' : 'Создайте первый матч — и ведите статистику по видео или вживую.'}</small></div>`}</div>`;
+}
+function paintHome() {
+  const el = $('home');
+  if (!ui.home) { el.hidden = true; el.innerHTML = ''; return; }
+  const v = ui.home;
+  el.hidden = false;
+  el.innerHTML = `<aside class="hside">
+      <div class="hbrand"><img src="img/logo.svg" alt=""><span><b>Волей Метрика</b><small>Студия</small></span></div>
+      ${HOME_VIEWS.map(([k, l, ic]) => `<button class="${v === k ? 'on' : ''}" data-a="homeView" data-v="${k}">${icon(ic)}${l}</button>`).join('')}
+      <a href="stats.html" target="_blank">${icon('i-chart')}Аналитика</a>
+      <span class="grow"></span>
+      <a href="detailed.html">${icon('i-phone')}Пульт для телефона</a>
+      <button data-a="homeSettings">${icon('i-gear')}Настройки</button>
+      ${ui.match ? `<button class="hback" data-a="homeClose">${icon('i-x')}Вернуться к матчу</button>` : ''}
+    </aside>
+    <main class="hmain">${homeMain(v)}</main>`;
+}
+function openHome(view = 'recent') { closeMenu(); ui.home = view; paintHome(); }
+function closeHome() { ui.home = null; paintHome(); render(); }
+
 function openHelp() {
   const k = (keys, text) => `<span class="k">${keys.map(x => `<span class="kbd">${x}</span>`).join('')}</span><span>${text}</span>`;
   modal(`<h2>Горячие клавиши</h2><p>Раскладка не важна. В полях ввода клавиши не срабатывают.</p>
@@ -2341,6 +2407,7 @@ async function createMatch(opponentId) {
   const format = pickFormat(ui.fmtSel ?? formatKey(ui.settings.lastFormat));
   ui.fmtSel = null;
   setMatch(await api('POST', '/api/matches', { opponentId, format }));
+  if (ui.home) closeHome();
   ui.settings.lastFormat = format;
   ui.matches = await api('GET', '/api/matches');
   if (ui.activeVideo) { await linkVideo(ui.activeVideo); store.set('video.' + ui.match.id, ui.activeVideo); toast('Открытое видео привязано к новому матчу'); }
@@ -2609,6 +2676,13 @@ const H = {
     sendRaw({ t: 'set', lineup: d.order, weServe: d.weServe, ...(setter && { setter }), ...(d.target && { target: d.target }) });
   },
   newMatch: openNewMatch,
+  home: (d, e) => { e?.preventDefault(); openHome(); },
+  homeView: d => { ui.home = d.v; paintHome(); },
+  homeClose: () => closeHome(),
+  homeOpen: d => call(async () => { await openMatch(d.id); ui.tab = 'events'; closeHome(); }),
+  homeNew: () => openNewMatch(),
+  homeVideo: () => { closeHome(); $('fileInput').click(); },
+  homeSettings: d => openSettings(d.tab),
   createMatch: d => call(() => createMatch(d.id)),
   createNewOpp: () => {
     const nm = $('newOpp').value.trim();
@@ -2750,6 +2824,12 @@ document.addEventListener('change', e => {
   if (k === 'etempo') updateEvent(ui.edit, { tempo: v });
 });
 document.addEventListener('input', e => {
+  if (e.target.dataset.k === 'homeQ') {
+    ui.homeQ = e.target.value;
+    const pos = e.target.selectionStart;
+    paintHome();
+    const inp = document.querySelector('#home .hsearch'); if (inp) { inp.focus(); inp.setSelectionRange(pos, pos); }
+  }
   if (ui.team && e.target.dataset.k === 'teamName') ui.team.teamName = e.target.value;
   if (ui.team && e.target.dataset.k === 'kitColor') { ui.team.kit[e.target.dataset.key] = e.target.value; document.querySelector('.kitprev').innerHTML = kitPreview(ui.team.kit); }
   if (ui.team && e.target.dataset.k === 'oppName') ui.team.opponents[+e.target.dataset.i].name = e.target.value;
@@ -2782,7 +2862,13 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && ui.lineupDraft?.order.length === 6 && $('modal').querySelector('[data-a=lstart]')) H.lstart();
     return;
   }
-  if (e.ctrlKey || e.metaKey) { if (e.code === 'KeyZ') { e.preventDefault(); undo(); } if (e.code === 'Comma') { e.preventDefault(); openSettings(); } return; }
+  // Стартовый экран: клавиши студии не работают (матч под ним), Esc — вернуться к матчу.
+  if (ui.home) {
+    if ((e.ctrlKey || e.metaKey) && e.code === 'Comma') { e.preventDefault(); openSettings(); }
+    if (e.key === 'Escape' && ui.match) closeHome();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey) { if (e.code === 'KeyZ') { e.preventDefault(); undo(); } if (e.code === 'Comma') { e.preventDefault(); openSettings(); } if (e.code === 'KeyO') { e.preventDefault(); openHome(); } return; }
   const c = e.code;
   if (c === 'BracketLeft' || c === 'BracketRight') { stepSpeed(c === 'BracketLeft' ? -1 : 1); return; }
   if (c === 'Escape' && $('speedPop').classList.contains('on')) { closeSpeed(); return; }
@@ -2892,6 +2978,8 @@ call(async () => {
   const id = location.hash.match(/m=([a-z0-9]+)/)?.[1] ?? store.get('lastMatch', null) ?? ui.matches[0]?.id;
   pollVideos();
   if (!store.get('tourDone', false)) setTimeout(() => startTour(0), 900);
+  const direct = /m=([a-z0-9]+)/.test(location.hash);
+  if (store.get('startScreen', true) && !direct) openHome();
   if (id && ui.matches.some(m => m.id === id)) {
     await openMatch(id);
     // Ссылка на конкретный розыгрыш (из отчёта игрока): #m=…&r=партия:розыгрыш.
