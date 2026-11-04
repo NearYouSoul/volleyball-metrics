@@ -379,8 +379,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(result === null ? 404 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify(result));
     }
-    if (url.pathname.startsWith('/media/')) return sendVideo(req, res, decodeURIComponent(url.pathname.slice(7)));
-    if (url.pathname.startsWith('/clips/')) return sendVideo(req, res, decodeURIComponent(url.pathname.slice(7)), CLIPS);
+    // await обязателен: иначе ошибка (например, файла уже нет) мимо catch роняет весь сервер.
+    if (url.pathname.startsWith('/media/')) return await sendVideo(req, res, decodeURIComponent(url.pathname.slice(7)));
+    if (url.pathname.startsWith('/clips/')) return await sendVideo(req, res, decodeURIComponent(url.pathname.slice(7)), CLIPS);
     const file = path.join(PUBLIC, url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname));
     if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
     const data = await readFile(file);
@@ -393,6 +394,10 @@ const server = http.createServer(async (req, res) => {
     if (!notFound) console.error(e);
   }
 });
+
+// Страховка на турнире: неожиданная ошибка пишется в окно сервера, а не останавливает его посреди матча.
+process.on('unhandledRejection', e => console.error('  Ошибка (сервер продолжает работать):', e?.message ?? e));
+process.on('uncaughtException', e => console.error('  Ошибка (сервер продолжает работать):', e?.message ?? e));
 
 // Подготовка видео прервалась (закрыли окно сервера) — продолжаем после запуска.
 for (const v of await readJson(videosFile, [])) if (v.status === 'processing' && hasFfmpeg()) enqueue(v.id);
