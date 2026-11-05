@@ -8,9 +8,10 @@ import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
-import { replay, LABELS } from './public/engine.js';
+import { replay, LABELS, formatOf } from './public/engine.js';
 import { buildTeamPackage, readTeamPackage, applyTeamPackage, buildMatchPackage, readMatchPackage, importMatch, statsCsv, TEAM_PARTS } from './transfer.js';
 import { replayQuick } from './public/quick-engine.js';
+import { MODES, MODE_KEYS, emptyStats, migrate, sheet } from './public/modes.js';
 import { hasFfmpeg, probe, plan, convert, cutHighlights } from './media.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -167,26 +168,44 @@ function readRaw(req, limit = 64e6) {
 const download = (name, data, type = 'application/zip') => ({ [FILE]: { name, type, data } });
 const FILE = Symbol('file');
 
-// full — отдать матчи целиком (для дашборда), иначе только краткую сводку (для меню пульта).
-// mode — 'quick' (быстрая статистика) или 'detail' (детальная; у старых матчей поля mode нет).
-async function readMatches(mode) {
+// Файл матча читаем всегда через перевод в новый формат: старые копии и импорт работают сами.
+const readMatch = async file => { const m = await readJson(file, null); return m && migrate(m); };
+const srcOf = url => (MODES[url.searchParams.get('src')] ? url.searchParams.get('src') : 'studio');
+async function readMatches() {
   const files = (await readdir(DATA)).filter(f => /^match-[a-z0-9]+\.json$/.test(f));
-  const matches = await Promise.all(files.map(f => readJson(path.join(DATA, f)).catch(e => {
+  const matches = await Promise.all(files.map(f => readMatch(path.join(DATA, f)).catch(e => {
     console.error(`  Не удалось прочитать ${f}, пропускаю:`, e.message); // один битый файл не должен ронять весь список
     return null;
   })));
-  return matches.filter(m => m && (m.mode || 'detail') === mode);
+  return matches.filter(Boolean);
+}
+// Один раз при запуске: старые файлы — в новый формат, перед этим резервная копия.
+async function migrateFiles() {
+  const files = (await readdir(DATA)).filter(f => /^match-[a-z0-9]+\.json$/.test(f));
+  const raw = (await Promise.all(files.map(async f => ({ f, m: await readJson(path.join(DATA, f), null).catch(() => null) })))).filter(x => x.m && !x.m.stats);
+  if (!raw.length) return;
+  await makeBackup('перед переходом на единый матч');
+  for (const { f, m } of raw) await writeJson(path.join(DATA, f), migrate(m));
+  console.log(`  Матчи переведены в новый формат: ${raw.length}`);
+}
+// Сводка матча: по каждому режиму — партии со счётом. main — режим, где сыграно больше всего очков.
+function summary(m) {
+  const modes = {};
+  for (const k of MODE_KEYS) {
+    const st = (k === 'express' ? replayQuick : replay)(sheet(m, k));
+    modes[k] = { events: m.stats[k].events.length, sets: st.sets.map(s => ({ n: s.n, us: s.us, them: s.them, over: !!s.over, target: s.target })), setsWon: st.setsWon, over: st.matchOver };
+  }
+  const points = k => modes[k].sets.reduce((a, s) => a + s.us + s.them, 0);
+  const main = MODE_KEYS.reduce((a, k) => (points(k) > points(a) ? k : a), MODE_KEYS[0]);
+  return { modes, main, setsWon: modes[main].setsWon, over: modes[main].over, events: MODE_KEYS.reduce((a, k) => a + modes[k].events, 0) };
 }
 
-async function listMatches(full, mode) {
+// full — матчи целиком глазами режима src (для аналитики), иначе сводка по всем режимам.
+async function listMatches(full, src) {
   const refs = await loadRefs();
-  const matches = (await readMatches(mode)).map(m => hydrate(m, refs)).sort((a, b) => b.created.localeCompare(a.created));
-  if (full) return matches;
-  const replayFn = mode === 'quick' ? replayQuick : replay;
-  return matches.map(m => {
-    const st = replayFn(m);
-    return { id: m.id, opponentId: m.opponentId, opponent: m.opponent, tournament: m.tournament ?? null, created: m.created, setsWon: st.setsWon, over: st.matchOver, videos: m.videos || [], events: m.events.length };
-  });
+  const matches = (await readMatches()).map(m => hydrate(m, refs)).sort((a, b) => b.created.localeCompare(a.created));
+  if (full) return matches.map(m => sheet(m, src));
+  return matches.map(m => ({ id: m.id, opponentId: m.opponentId, opponent: m.opponent, tournament: m.tournament ?? null, created: m.created, format: formatOf(m), videos: m.videos || [], ...summary(m) }));
 }
 
 async function api(req, url) {
@@ -207,28 +226,18 @@ async function api(req, url) {
     });
   }
   if (route === 'GET /api/qr') {
-    const urls = lanAddresses().map(ip => `http://${ip}:${PORT}/`);
+    const urls = lanAddresses().map(ip => `http://${ip}:${PORT}/quick.html`); // телефон — только пульт
     return { urls, qr: urls.length ? await QRCode.toDataURL(urls[0], { margin: 1, width: 320 }) : null };
   }
-  if (route === 'GET /api/matches') return listMatches(url.searchParams.has('full'), url.searchParams.get('mode') || 'detail');
-  // Очистить все матчи режима (перед турниром). Файлы уезжают в data/trash.
-  if (route === 'DELETE /api/matches') {
-    const mode = url.searchParams.get('mode') || 'detail';
-    return serial(async () => {
-      const matches = await readMatches(mode);
-      for (const m of matches) await toTrash(matchFile(m.id));
-      return { deleted: matches.length };
-    });
-  }
+  if (route === 'GET /api/matches') return listMatches(url.searchParams.has('full'), srcOf(url));
   if (route === 'POST /api/matches') {
-    const { opponentId, mode, format, tournament } = await readBody(req);
+    const { opponentId, format, tournament } = await readBody(req);
     // Формат матча (до скольки побед, до скольки очков) — запоминаем как последний выбранный.
     const fmt = format && Number.isInteger(format.sets) && format.sets >= 1 && format.sets <= 5 ? { sets: format.sets, points: +format.points || 25, tiebreak: +format.tiebreak || 15 } : null;
     if (fmt) await serial(async () => { const st = await readSettings(); st.lastFormat = fmt; await writeJson(settingsFile, st); });
     const refs = await loadRefs();
     const match = {
       id: Date.now().toString(36),
-      ...(mode === 'quick' && { mode }),
       opponentId,
       ...(fmt && { format: fmt }),
       // Турнир: явно выбранный или текущий из настроек — матчи с турнира группируются в аналитике.
@@ -239,9 +248,9 @@ async function api(req, url) {
       // Пресет команды (расстановки + схема) — активный в настройках; схема — из пресета.
       ...(() => { const pr = refs.settings.presets?.find(x => x.id === refs.settings.activePreset); return { system: pr?.system || refs.settings.system || '5-1', ...(pr && { preset: pr.id }) }; })(),
       videos: [],
-      events: [],
+      stats: emptyStats(),
     };
-    return serial(async () => { await writeJson(matchFile(match.id), match); return hydrate(match, refs); });
+    return serial(async () => { await writeJson(matchFile(match.id), match); return sheet(hydrate(match, refs), srcOf(url)); });
   }
 
   // ---------- Экспорт и импорт ----------
@@ -274,7 +283,7 @@ async function api(req, url) {
   // Один матч: события, состав на матч, соперник — ZIP (видео не входит).
   const em = url.pathname.match(/^\/api\/export\/match\/([a-z0-9]+)$/);
   if (em && req.method === 'GET') {
-    const m = await readJson(matchFile(em[1]), null);
+    const m = await readMatch(matchFile(em[1]));
     if (!m) return null;
     const refs = await loadRefs();
     const f = buildMatchPackage(hydrate(m, refs), refs, LABELS);
@@ -290,13 +299,13 @@ async function api(req, url) {
       await writeJson(rosterFile, roster);
       await writeJson(settingsFile, { ...refs.settings, opponents });
       await writeJson(matchFile(match.id), match);
-      return { id: match.id, opponent: match.opponent, events: match.events.length };
+      return { id: match.id, opponent: match.opponent, events: MODE_KEYS.reduce((a, k) => a + match.stats[k].events.length, 0) };
     });
   }
-  // Статистика игроков по всем детальным матчам — таблица для Excel.
+  // Статистика игроков по детальным режимам (в матче — студия, а если её нет — ручной) — таблица для Excel.
   if (route === 'GET /api/export/stats.csv') {
     const refs = await loadRefs();
-    const matches = (await readMatches('detail')).map(m => hydrate(m, refs));
+    const matches = (await readMatches()).map(m => hydrate(m, refs)).map(m => sheet(m, m.stats.studio.events.length ? 'studio' : 'manual')).filter(m => m.events.length);
     return download(`Статистика_${refs.settings.teamName || 'команда'}_${new Date().toISOString().slice(0, 10)}.csv`, statsCsv(matches), 'text/csv; charset=utf-8');
   }
 
@@ -325,8 +334,8 @@ async function api(req, url) {
     await mkdir(TRASH, { recursive: true });
     const files = (await readdir(TRASH)).filter(f => /match-[a-z0-9]+\.json$/.test(f));
     const items = await Promise.all(files.map(async f => {
-      const m = await readJson(path.join(TRASH, f), null).catch(() => null);
-      return m && { file: f, id: m.id, opponent: m.opponent, created: m.created, deleted: f.slice(0, 19), events: m.events?.length ?? 0, mode: m.mode ?? 'detail' };
+      const raw = await readJson(path.join(TRASH, f), null).catch(() => null), m = raw && migrate(raw);
+      return m && { file: f, id: m.id, opponent: m.opponent, created: m.created, deleted: f.slice(0, 19), events: MODE_KEYS.reduce((a, k) => a + m.stats[k].events.length, 0) };
     }));
     return items.filter(Boolean).sort((a, b) => b.file.localeCompare(a.file));
   }
@@ -417,16 +426,17 @@ async function api(req, url) {
 
   const m = url.pathname.match(/^\/api\/matches\/([a-z0-9]+)(\/events(\/last|\/(\d+))?)?$/);
   if (!m) return null;
-  const file = matchFile(m[1]);
+  const file = matchFile(m[1]), src = srcOf(url);
+  const view = async match => sheet(hydrate(match, await loadRefs()), src);
   if (req.method === 'GET' && !m[2]) {
-    const match = await readJson(file, null);
-    return match && hydrate(match, await loadRefs());
+    const match = await readMatch(file);
+    return match && view(match);
   }
   // Свойства матча: привязанные видео, схема игры.
   if (req.method === 'PATCH' && !m[2]) {
     const patch = await readBody(req);
     return serial(async () => {
-      const match = await readJson(file, null);
+      const match = await readMatch(file);
       if (!match) return null;
       if (Array.isArray(patch.videos)) match.videos = patch.videos;
       if (typeof patch.system === 'string') match.system = patch.system;
@@ -437,7 +447,7 @@ async function api(req, url) {
       if (patch.roles && typeof patch.roles === 'object') match.roles = Object.fromEntries(Object.entries(patch.roles).filter(([, r]) => r));
       if (patch.format && Number.isInteger(patch.format.sets)) match.format = { sets: patch.format.sets, points: +patch.format.points || 25, tiebreak: +patch.format.tiebreak || 15 };
       await writeJson(file, match);
-      return hydrate(match, await loadRefs());
+      return view(match);
     });
   }
   // Правка события по номеру (по видео): заменить или удалить любое, не только последнее.
@@ -445,11 +455,12 @@ async function api(req, url) {
     const k = Number(m[4]);
     const ev = req.method === 'PUT' ? await readBody(req) : null;
     return serial(async () => {
-      const match = await readJson(file, null);
-      if (!match || k >= match.events.length) return null;
-      if (ev) match.events[k] = ev; else match.events.splice(k, 1);
+      const match = await readMatch(file);
+      const evs = match?.stats[src].events;
+      if (!match || k >= evs.length) return null;
+      if (ev) evs[k] = ev; else evs.splice(k, 1);
       await writeJson(file, match);
-      return hydrate(match, await loadRefs());
+      return view(match);
     });
   }
   if (req.method === 'POST' && m[2] && !m[3]) {
@@ -457,14 +468,15 @@ async function api(req, url) {
     // ?at=N — вставить перед событием N (пропущенное касание, найденное на видео).
     const at = url.searchParams.has('at') ? Number(url.searchParams.get('at')) : null;
     return serial(async () => {
-      const match = await readJson(file, null);
+      const match = await readMatch(file);
       if (!match) return null; // матч удалили с другого устройства
+      const evs = match.stats[src].events;
       // Повтор того же нажатия (ответ потерялся при плохой связи) — второй раз не добавляем.
-      if (ev?.cid && match.events.some(e => e.cid === ev.cid)) return hydrate(match, await loadRefs());
-      if (at !== null && at >= 0 && at < match.events.length) match.events.splice(at, 0, ev);
-      else match.events.push(ev);
+      if (ev?.cid && evs.some(e => e.cid === ev.cid)) return view(match);
+      if (at !== null && at >= 0 && at < evs.length) evs.splice(at, 0, ev);
+      else evs.push(ev);
       await writeJson(file, match);
-      return hydrate(match, await loadRefs());
+      return view(match);
     });
   }
   if (req.method === 'DELETE' && !m[2]) {
@@ -478,12 +490,13 @@ async function api(req, url) {
     // ?expect=N — удалить последнее, только если событий ровно N (повтор отмены при плохой связи не удалит лишнего).
     const expect = url.searchParams.has('expect') ? Number(url.searchParams.get('expect')) : null;
     return serial(async () => {
-      const match = await readJson(file, null);
+      const match = await readMatch(file);
       if (!match) return null;
-      if (expect !== null && match.events.length !== expect) return hydrate(match, await loadRefs());
-      match.events.pop();
+      const evs = match.stats[src].events;
+      if (expect !== null && evs.length !== expect) return view(match);
+      evs.pop();
       await writeJson(file, match);
-      return hydrate(match, await loadRefs());
+      return view(match);
     });
   }
   return null;
@@ -581,12 +594,13 @@ process.on('uncaughtException', e => console.error('  Ошибка (сервер
 // Подготовка видео прервалась (закрыли окно сервера) — продолжаем после запуска.
 for (const v of await readJson(videosFile, [])) if (v.status === 'processing' && hasFfmpeg()) enqueue(v.id);
 
+await migrateFiles().catch(e => console.error('  Не удалось перевести матчи:', e.message));
 dailyBackup();
 setInterval(dailyBackup, 3600e3).unref();
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Волей Метрика запущена`);
   console.log(`  Компьютер: http://localhost:${PORT}`);
-  for (const ip of lanAddresses()) console.log(`  Телефон:   http://${ip}:${PORT}/`);
+  for (const ip of lanAddresses()) console.log(`  Телефон:   http://${ip}:${PORT}/quick.html`);
   console.log(`\n  QR-код для телефона — в «Настройках». Не закрывай это окно, пока идёт матч.\n`);
 });

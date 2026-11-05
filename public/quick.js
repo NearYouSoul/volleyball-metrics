@@ -1,16 +1,14 @@
 // Пульт быстрой статистики: сначала КТО закончил розыгрыш, потом ЧЕМ. Счёт и подача считаются сами.
-// Экраны: «Матчи», «Соперник», «Кто подаёт первым», «Матч».
+// Экраны: «Матчи», «Кто подаёт первым», «Матч». Матчи создаются на компьютере, здесь только выбираем.
 // На ноутбуке всё можно делать с клавиатуры: цифра — игрок, буква — результат, Backspace — отмена.
 import { replayQuick, RESULTS, PLAYER_POINTS, PLAYER_ERRORS } from './quick-engine.js';
-import { playerName, setTitle, formatOptions, formatKey, pickFormat } from './engine.js';
+import { playerName, setTitle } from './engine.js';
 import { createSync, statusBadge } from './offline.js';
 
 const $app = document.getElementById('app');
 const ui = { view: 'home', matches: [], roster: [], settings: { teamName: 'Мы', opponents: [] }, match: null, st: null, sel: null, busy: false };
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-// crypto.randomUUID недоступен по http в локальной сети, поэтому простой id.
-const newId = () => Math.random().toString(36).slice(2, 8);
 
 // Клавиши результатов. Физические клавиши (e.code), чтобы работало и в русской раскладке.
 const KEYS = { kill: 'Q', block: 'W', ace: 'E', srvErr: 'A', attErr: 'S', blocked: 'D', recErr: 'F', digErr: 'G', fault: 'H', lost: 'J', oppErr: '+', oppKill: '−' };
@@ -41,7 +39,7 @@ function setMatch(match) {
 }
 
 // Нажатия идут через очередь: без связи с ноутбуком очки считаются на экране и досылаются, когда связь вернётся.
-const sync = createSync({ getMatch: () => ui.match && { ...ui.match, events: [...ui.match.events] }, setMatch: m => { setMatch(m); render(); }, onStatus: statusBadge });
+const sync = createSync({ src: 'express', getMatch: () => ui.match && { ...ui.match, events: [...ui.match.events] }, setMatch: m => { setMatch(m); render(); }, onStatus: statusBadge });
 const send = ev => { ui.sel = null; sync.post(ev); };
 const undo = () => {
   ui.sel = null;
@@ -71,46 +69,20 @@ function result(key, p = null, cls = '') {
 function viewHome() {
   return `
     <nav class="flex items-center justify-between">
-      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Режимы</a>
-      <a class="btn btn-ghost btn-sm -mr-3" href="quick-stats.html">Дашборд</a>
+      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Главная</a>
     </nav>
-    <h1 class="mt-6 text-[32px] leading-tight font-normal">Быстрая статистика</h1>
-    <p class="mt-1 text-ash">${esc(ui.settings.teamName)}, в составе ${ui.roster.length} ${plural(ui.roster.length, 'игрок', 'игрока', 'игроков')}</p>
-    <button class="btn btn-primary mt-6 w-full min-h-14 text-base" data-a="pickOpponent">Начать матч</button>
-    <h2 class="mt-10 mb-3 text-sm font-medium text-ash">Матчи</h2>
+    <h1 class="mt-6 text-[32px] leading-tight font-normal">Экспресс stat</h1>
+    <p class="mt-1 text-ash">${esc(ui.settings.teamName)}. Выберите матч и нажимайте кнопки: всё запишется на компьютер.</p>
+    <h2 class="mt-8 mb-3 text-sm font-medium text-ash">Матчи</h2>
     <div class="grid gap-2">
-      ${ui.matches.map(m => `
-        <div class="surface flex items-center gap-2 py-1.5 pr-1.5 pl-4">
-          <button class="min-w-0 flex-1 cursor-pointer py-2 text-left" data-a="open" data-id="${m.id}">
+      ${ui.matches.map(m => { const x = m.modes.express; return `
+        <button class="surface flex w-full cursor-pointer items-center gap-2 py-3 pr-4 pl-4 text-left" data-a="open" data-id="${m.id}">
+          <span class="min-w-0 flex-1">
             <span class="block truncate font-medium">${esc(m.opponent)}</span>
-            <span class="block text-[13px] text-smoke">${date(m.created)}${m.over ? '' : ', идёт'}</span>
-          </button>
-          <span class="num px-2 text-xl ${m.over ? (m.setsWon.us > m.setsWon.them ? 'text-mint' : 'text-coral') : 'text-white'}">${m.setsWon.us}:${m.setsWon.them}</span>
-          <button class="btn btn-ghost btn-sm w-9 px-0" data-a="del" data-id="${m.id}" aria-label="Удалить матч">
-            <svg viewBox="0 0 20 20" class="size-4" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
-          </button>
-        </div>`).join('') || '<p class="text-sm text-smoke">Матчей пока нет. Нажмите «Начать матч» перед первой подачей.</p>'}
-    </div>`;
-}
-
-function plural(n, one, few, many) {
-  const m10 = n % 10, m100 = n % 100;
-  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
-}
-
-function viewPickOpponent() {
-  return `
-    <nav>${back('home', 'Матчи')}</nav>
-    <h1 class="mt-6 text-[32px] leading-tight font-normal">С кем играем?</h1>
-    <label class="mt-4 grid gap-1.5 text-sm text-ash">Формат матча
-      <select id="fmt" class="field">${formatOptions(formatKey(ui.settings.lastFormat))}</select></label>
-    <div class="mt-6 grid gap-2">
-      ${ui.settings.opponents.map(o => `<button class="btn min-h-14 justify-start px-5 text-base" data-a="newMatch" data-id="${o.id}">${esc(o.name)}</button>`).join('')}
-    </div>
-    <h2 class="mt-8 mb-3 text-sm font-medium text-ash">Новая команда</h2>
-    <div class="grid gap-2">
-      <input id="newOpp" class="field" placeholder="Название команды" autocomplete="off">
-      <button class="btn btn-primary min-h-12" data-a="newOpponentMatch">Добавить и начать матч</button>
+            <span class="block text-[13px] text-smoke">${date(m.created)}${x.events ? (x.over ? '' : ', идёт') : ', ещё не начат'}</span>
+          </span>
+          <span class="num px-2 text-xl ${x.over ? (x.setsWon.us > x.setsWon.them ? 'text-mint' : 'text-coral') : 'text-white'}">${x.setsWon.us}:${x.setsWon.them}</span>
+        </button>`; }).join('') || '<p class="text-sm text-smoke">Матчей пока нет. Создайте матч на компьютере.</p>'}
     </div>`;
 }
 
@@ -179,7 +151,6 @@ function viewLive() {
   return `
     <nav class="mb-3 flex items-center justify-between">
       ${back('home', 'Матчи')}
-      <a class="btn btn-ghost btn-sm -mr-3" href="quick-stats.html#m=${ui.match.id}">Дашборд</a>
     </nav>
     ${viewBoard()}
     <div class="my-3 flex min-h-11 items-center gap-3">
@@ -230,53 +201,21 @@ async function goHome() {
   ui.sel = null;
   history.replaceState(null, '', location.pathname);
   [ui.matches, ui.roster, ui.settings] = await Promise.all([
-    api('GET', '/api/matches?mode=quick'), api('GET', '/api/roster'), api('GET', '/api/settings'),
+    api('GET', '/api/matches'), api('GET', '/api/roster'), api('GET', '/api/settings'),
   ]);
 }
 
 async function openMatch(id) {
-  const match = await api('GET', `/api/matches/${id}`);
-  if (match?.mode !== 'quick') return; // матч детального режима — не наш
+  const match = await api('GET', `/api/matches/${id}?src=express`);
+  if (!match) return;
   setMatch(match);
   ui.view = ui.st.set ? 'live' : 'serveFirst';
 }
 
-const createMatch = async opponentId => {
-  const sel = document.getElementById('fmt')?.value ?? formatKey(ui.settings.lastFormat);
-  setMatch(await api('POST', '/api/matches', { opponentId, mode: 'quick', format: pickFormat(sel) }));
-  ui.view = 'serveFirst';
-};
-
 const handlers = {
   // Из матча выходим «Назад» браузера, чтобы не копить записи истории; переход на список делает hashchange.
   home: () => { if (pushed && ui.match && location.hash.includes('m=')) { pushed = false; history.back(); } else call(goHome); },
-  pickOpponent: () => {
-    if (!ui.roster.length) {
-      if (confirm('В составе нет игроков. Открыть настройки?')) location.href = 'detailed.html#settings';
-      return;
-    }
-    ui.view = 'pickOpponent';
-    render();
-  },
-  newMatch: d => call(() => createMatch(d.id)),
-  newOpponentMatch: () => {
-    const name = document.getElementById('newOpp').value.trim();
-    if (!name) return alert('Введите название команды соперника');
-    // Если такой соперник уже есть (матчи с одной командой повторяются) — берём его, а не плодим дубль.
-    const same = ui.settings.opponents.find(o => o.name.trim().toLowerCase() === name.toLowerCase());
-    if (same) return call(() => createMatch(same.id));
-    const opp = { id: newId(), name };
-    call(async () => {
-      ui.settings = await api('PUT', '/api/settings', { ...ui.settings, opponents: [...ui.settings.opponents, opp] });
-      await createMatch(opp.id);
-    });
-  },
   open: d => call(() => openMatch(d.id)),
-  del: d => {
-    const m = ui.matches.find(x => x.id === d.id);
-    if (!confirm(`Удалить матч с «${m.opponent}» (${date(m.created)})? Он исчезнет из статистики (файл уедет в data/trash).`)) return;
-    call(async () => { await api('DELETE', `/api/matches/${d.id}`); await goHome(); });
-  },
   startSet: d => { sync.post({ t: 'set', weServe: d.v === '1' }); ui.view = 'live'; render(); },
   nextSet: () => { ui.view = 'serveFirst'; render(); },
   sel: d => { ui.sel = ui.sel === d.id ? null : d.id; render(); },
@@ -314,7 +253,7 @@ addEventListener('keydown', e => {
 setInterval(async () => {
   if (ui.view !== 'live' || ui.busy || ui.sel || document.hidden) return;
   try {
-    const m = await api('GET', `/api/matches/${ui.match.id}`);
+    const m = await api('GET', `/api/matches/${ui.match.id}?src=express`);
     if (ui.view !== 'live' || ui.busy || ui.sel || !m || m.id !== ui.match.id) return;
     if (JSON.stringify(m.events) !== JSON.stringify(ui.match.events)) { setMatch(m); render(); }
   } catch { /* сеть моргнула — попробуем в следующий раз */ }

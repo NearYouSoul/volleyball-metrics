@@ -1,5 +1,6 @@
 // Экспорт и импорт: пакет команды (без матчей), один матч, таблица статистики для Excel.
 // Чистые функции над данными — сервер только читает/пишет файлы. Архивы — обычный ZIP (zip.js).
+import { MODES, MODE_KEYS, migrate } from './public/modes.js';
 import { makeZip, readZip } from './zip.js';
 import { replay, newPlayer, addStats, totals, attEff, recRating } from './public/engine.js';
 
@@ -85,17 +86,19 @@ export function applyTeamPackage({ roster, settings }, team, parts = team.parts 
 
 // ---------- Один матч ----------
 // Матч целиком (события, состав на матч, привязка видео по имени файла) + соперник с эмблемой + события таблицей.
-export function buildMatchPackage(match, { settings }, labels = {}, when = new Date()) {
+export function buildMatchPackage(raw, { settings }, labels = {}, when = new Date()) {
+  const match = migrate(raw);
   const opp = settings.opponents?.find(o => o.id === match.opponentId) ?? null;
   const pkg = { format: MATCH_FORMAT, version: 1, exported: when.toISOString(), teamName: settings.teamName, opponent: opp ? { id: opp.id, name: opp.name, emblem: opp.emblem ?? null } : { name: match.opponent }, match };
+  const events = MODE_KEYS.flatMap(k => match.stats[k].events.map(e => ({ ...e, mode: MODES[k].name })));
   const name = id => { const p = match.roster.find(x => x.id === id); return p ? `${p.num ?? ''} ${p.name ?? ''}`.trim() : ''; };
-  const rows = [['№', 'Партия', 'Время видео, с', 'Действие', 'Результат', 'Игрок', 'Откуда x', 'Откуда y', 'Куда x', 'Куда y']];
-  match.events.forEach((e, i) => rows.push([i + 1, '', e.vt ?? '', e.t === 'act' ? e.skill : e.t, e.t === 'act' ? labels[e.skill]?.[e.res] ?? e.res : '', name(e.p), e.from?.x ?? '', e.from?.y ?? '', e.to?.x ?? '', e.to?.y ?? '']));
+  const rows = [['№', 'Режим', 'Время видео, с', 'Действие', 'Результат', 'Игрок', 'Откуда x', 'Откуда y', 'Куда x', 'Куда y']];
+  events.forEach((e, i) => rows.push([i + 1, e.mode, e.vt ?? '', e.t === 'act' ? e.skill : e.t, e.t === 'act' ? labels[e.skill]?.[e.res] ?? e.res : '', name(e.p), e.from?.x ?? '', e.from?.y ?? '', e.to?.x ?? '', e.to?.y ?? '']));
   const title = `${slug(settings.teamName)}-${slug(pkg.opponent.name)}_${(match.created || '').slice(0, 10)}`;
   const files = [
     { name: 'match.json', data: JSON.stringify(pkg, null, 2) },
     { name: 'События.csv', data: toCsv(rows) },
-    { name: 'ПРОЧТИ.txt', data: `Матч ${settings.teamName} — ${pkg.opponent.name} (${(match.created || '').slice(0, 10)}) из «Волей Метрики».\r\nСобытий: ${match.events.length}. Видео в архив не входит — его можно привязать заново в студии.\r\n\r\nКак загрузить: Студия → Настройки → Данные → «Загрузить матч».\r\n` },
+    { name: 'ПРОЧТИ.txt', data: `Матч ${settings.teamName} — ${pkg.opponent.name} (${(match.created || '').slice(0, 10)}) из «Волей Метрики».\r\nСобытий: ${events.length}. Видео в архив не входит — его можно привязать заново в студии.\r\n\r\nКак загрузить: Студия → Настройки → Данные → «Загрузить матч».\r\n` },
   ];
   return { name: `Матч_${title}.zip`, data: makeZip(files, when) };
 }
@@ -104,13 +107,13 @@ export function readMatchPackage(buf) {
   if (!text) throw new Error('В архиве нет match.json — это не файл матча');
   let pkg;
   try { pkg = JSON.parse(text.replace(/^\uFEFF/, '')); } catch { throw new Error('Это не файл матча «Волей Метрики»'); }
-  if (pkg.format !== MATCH_FORMAT || !pkg.match?.events) throw new Error('Это не файл матча «Волей Метрики»');
+  if (pkg.format !== MATCH_FORMAT || !(pkg.match?.events || pkg.match?.stats)) throw new Error('Это не файл матча «Волей Метрики»');
   return pkg;
 }
 // Добавить матч: новый id, если такой уже есть; соперник — найти по id/названию или добавить;
 // игроки из состава матча, которых нет в команде, добавляются «в запас» (чтобы имена в отчётах были).
 export function importMatch({ roster, settings, ids }, pkg) {
-  const m = structuredClone(pkg.match);
+  const m = migrate(structuredClone(pkg.match));
   if (ids.has(m.id)) m.id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
   const opps = (settings.opponents ?? []).map(o => ({ ...o }));
   let opp = opps.find(o => o.id === pkg.opponent?.id) ?? opps.find(o => (o.name || '').trim().toLowerCase() === (pkg.opponent?.name || '').trim().toLowerCase());

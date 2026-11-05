@@ -9,7 +9,7 @@ const load = id => { try { return JSON.parse(localStorage.getItem(KEY(id))) ?? [
 const save = (id, q) => { try { q.length ? localStorage.setItem(KEY(id), JSON.stringify(q)) : localStorage.removeItem(KEY(id)); } catch { /* приватный режим */ } };
 export const cid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-export function createSync({ getMatch, setMatch, onStatus }) {
+export function createSync({ src, getMatch, setMatch, onStatus }) {
   let queue = [], matchId = null, flushing = false, online = true, timer = null;
   const status = () => onStatus?.({ online, pending: queue.length });
 
@@ -24,7 +24,7 @@ export function createSync({ getMatch, setMatch, onStatus }) {
 
   async function send(op) {
     const id = matchId;
-    const url = op.op === 'post' ? `/api/matches/${id}/events` : `/api/matches/${id}/events/last?expect=${op.expect}`;
+    const url = op.op === 'post' ? `/api/matches/${id}/events?src=${src}` : `/api/matches/${id}/events/last?expect=${op.expect}&src=${src}`;
     const r = await fetch(url, { method: op.op === 'post' ? 'POST' : 'DELETE', headers: { 'Content-Type': 'application/json' }, body: op.op === 'post' ? JSON.stringify(op.ev) : undefined });
     if (!r.ok) throw new Error(r.status);
     return r.json();
@@ -35,7 +35,7 @@ export function createSync({ getMatch, setMatch, onStatus }) {
     flushing = true;
     let last = null;
     while (queue.length) {
-      try { last = await send(queue[0]); queue.shift(); save(matchId, queue); online = true; }
+      try { last = await send(queue[0]); queue.shift(); save(src + matchId, queue); online = true; }
       catch { online = false; status(); clearTimeout(timer); timer = setTimeout(flush, 2000); break; }
     }
     flushing = false;
@@ -48,19 +48,19 @@ export function createSync({ getMatch, setMatch, onStatus }) {
     // Открыли матч: подхватываем неотправленное (например, страницу обновили без связи) поверх серверной версии.
     attach(match) {
       matchId = match?.id ?? null;
-      queue = matchId ? load(matchId) : [];
+      queue = matchId ? load(src + matchId) : [];
       if (queue.length) { for (const op of queue) applyLocal(op); flush(); }
       status();
     },
-    post(ev) { const op = { op: 'post', ev: { ...ev, cid: cid() } }; queue.push(op); save(matchId, queue); applyLocal(op); flush(); },
+    post(ev) { const op = { op: 'post', ev: { ...ev, cid: cid() } }; queue.push(op); save(src + matchId, queue); applyLocal(op); flush(); },
     undo() {
       const m = getMatch();
       if (!m?.events.length) return;
       // Последнее ещё не ушло на сервер — просто убираем его из очереди.
       const lastOp = queue.at(-1);
-      if (lastOp?.op === 'post' && !flushing) { queue.pop(); save(matchId, queue); m.events.pop(); setMatch(m); status(); return; }
+      if (lastOp?.op === 'post' && !flushing) { queue.pop(); save(src + matchId, queue); m.events.pop(); setMatch(m); status(); return; }
       const op = { op: 'undo', expect: m.events.length };
-      queue.push(op); save(matchId, queue); applyLocal(op); flush();
+      queue.push(op); save(src + matchId, queue); applyLocal(op); flush();
     },
     pending: () => queue.length,
   };

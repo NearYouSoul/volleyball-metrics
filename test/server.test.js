@@ -96,3 +96,23 @@ test('сервер: скаутинг — опция матча, номер со�
   assert.equal(ev.events.at(-1).opp, '7');
   assert.equal((await api('PATCH', `/api/matches/${m.id}`, { scout: false })).json.scout, false);
 });
+
+test('сервер: режимы статистики не смешиваются, сводка показывает партии каждого', async () => {
+  const m = (await api('POST', '/api/matches', { opponentId: 'x' })).json;
+  await api('POST', `/api/matches/${m.id}/events?src=express`, { t: 'set', weServe: true });
+  await api('POST', `/api/matches/${m.id}/events?src=express`, { t: 'end', res: 'oppErr', p: null });
+  assert.equal((await api('GET', `/api/matches/${m.id}?src=express`)).json.events.length, 2);
+  assert.equal((await api('GET', `/api/matches/${m.id}?src=studio`)).json.events.length, 0);
+  assert.equal((await api('GET', `/api/matches/${m.id}?src=manual`)).json.events.length, 0);
+  const s = (await api('GET', '/api/matches')).json.find(x => x.id === m.id);
+  assert.equal(s.main, 'express');
+  assert.deepEqual(s.modes.express.sets.map(x => [x.us, x.them, x.over]), [[1, 0, false]]);
+  assert.equal(s.modes.studio.events, 0);
+});
+
+test('сервер: старый файл матча читается как новый и сам переводится при записи', async () => {
+  await writeFile(path.join(dir, 'match-oldq.json'), JSON.stringify({ id: 'oldq', mode: 'quick', opponentId: 'x', opponent: 'X', created: '2026-01-01T00:00:00Z', roster: [], videos: [], events: [{ t: 'set', weServe: true }] }));
+  assert.equal((await api('GET', '/api/matches/oldq?src=express')).json.events.length, 1);
+  await api('POST', '/api/matches/oldq/events?src=express', { t: 'end', res: 'oppErr', p: null });
+  assert.equal((await api('GET', '/api/matches/oldq?src=express')).json.events.length, 2);
+});
