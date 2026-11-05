@@ -2978,8 +2978,9 @@ call(async () => {
   const id = location.hash.match(/m=([a-z0-9]+)/)?.[1] ?? store.get('lastMatch', null) ?? ui.matches[0]?.id;
   pollVideos();
   if (!store.get('tourDone', false)) setTimeout(() => startTour(0), 900);
-  const direct = /m=([a-z0-9]+)/.test(location.hash);
-  if (store.get('startScreen', true) && !direct) openHome();
+  // Со стартового экрана программы: #new — новый матч, #settings[=раздел] — настройки, #home — стартовый экран студии.
+  const h = location.hash, direct = /m=([a-z0-9]+)/.test(h), cmd = /^#(new|settings|home)/.test(h);
+  if (h === '#home' || (store.get('startScreen', true) && !direct && !cmd)) openHome();
   if (id && ui.matches.some(m => m.id === id)) {
     await openMatch(id);
     // Ссылка на конкретный розыгрыш (из отчёта игрока): #m=…&r=партия:розыгрыш.
@@ -2987,12 +2988,20 @@ call(async () => {
     if (rk) setTimeout(() => { ui.tab = 'events'; ui.evView = 'rallies'; pickRally(rk); }, 300);
   }
   else ui.tab = 'match';
+  if (h === '#new') openNewMatch();
+  const sm = /^#settings(?:=(\w+))?/.exec(h);
+  if (sm) openSettings(sm[1] || 'general');
+  if (cmd) history.replaceState(null, '', location.pathname + (ui.match ? '#m=' + ui.match.id : ''));
 });
 // Дашборд и телефон могут менять данные — подтягиваем список матчей, когда окно снова в фокусе.
 addEventListener('focus', () => { if (!ui.busy) loadAll().then(() => ui.match && api('GET', `/api/matches/${ui.match.id}`)).then(m => { if (m) setMatch(m); render(); }).catch(() => {}); });
 
 // Ссылка на другой матч или розыгрыш в уже открытой студии (#m=…&r=…) — открываем без перезагрузки.
 addEventListener('hashchange', () => {
+  const sm = /^#settings(?:=(\w+))?/.exec(location.hash);
+  if (sm) { openSettings(sm[1] || 'general'); return; }
+  if (location.hash === '#new') { openNewMatch(); return; }
+  if (location.hash === '#home') { openHome(); return; }
   const id = location.hash.match(/m=([a-z0-9]+)/)?.[1];
   const rk = location.hash.match(/r=(\d+:\d+)/)?.[1];
   if (!id) return;
