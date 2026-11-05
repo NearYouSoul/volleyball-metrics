@@ -14,7 +14,7 @@ let F = { p: params.get('p'), tour: params.get('t') ?? 'all', opp: 'all' };
 let D = null;
 
 async function load() {
-  const [settings, matches, roster] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/matches?full').then(r => r.json()), fetch('/api/roster').then(r => r.json())]);
+  const [settings, matches, roster] = await Promise.all([fetch('/api/settings').then(r => r.json()), Promise.all(['studio', 'manual'].map(s => fetch('/api/matches?full&src=' + s).then(r => r.json()))).then(l => l.flat().filter(m => m.events.length)), fetch('/api/roster').then(r => r.json())]);
   D = { settings, matches: matches.reverse(), roster }; // по времени: старые → новые
 }
 

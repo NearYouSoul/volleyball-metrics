@@ -1,8 +1,11 @@
-// Стартовый экран программы (корневая страница): как в Figma / Adobe — боковая панель и главная.
-// Главная: продолжить последний матч, новый матч, режимы (студия, пульт, быстрая статистика), недавние матчи.
-// «Все матчи» — детальные и быстрые, по турнирам, с поиском. «Команда» — состав и переход к настройкам.
-// «Телефон» — адрес и QR для пульта. Клавиши 1 / 2 / 3 — быстрая, пульт, студия (как раньше).
+// Оболочка программы (корневая страница): боковое меню как в Notion и основное окно с разделами.
+// Главная, Матчи, Команда, Аналитика — все в одном окне. Настройки и новый матч — окнами поверх него.
+// Адрес: #matches, #team, #analytics[/матч[/режим[/партия]]].
 import { ROLES, roleOf } from './court.js';
+import { MODES, MODE_KEYS } from './modes.js';
+import { createSettings } from './settings-ui.js';
+import { emblem, matchHead, matchGrid } from './match-card.js';
+import { createAnalytics } from './analytics.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -11,113 +14,152 @@ const store = {
   get: (k, d) => { try { return JSON.parse(localStorage.getItem('home.' + k)) ?? d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem('home.' + k, JSON.stringify(v)); } catch { /* приватный режим */ } },
 };
-const lastStudioMatch = () => { try { return JSON.parse(localStorage.getItem('studio.lastMatch')); } catch { return null; } };
 
-const S = { view: store.get('view', 'recent'), q: '', settings: { teamName: '', opponents: [], tournaments: [] }, roster: [], detail: [], quick: [], qr: null };
+const S = { view: 'recent', route: {}, q: '', open: null, settings: { teamName: '', opponents: [], tournaments: [] }, roster: [], matches: [], sections: [], section: null, folded: store.get('folded', false) };
 
-function emblem(src, title, cls = '') {
-  if (src) return `<img class="emb ${cls}" src="${src}" alt="">`;
-  const ini = String(title || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  let h = 0; for (const ch of String(title)) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return `<span class="emb ini ${cls}" style="background:hsl(${h} 45% 32%)">${esc(ini)}</span>`;
-}
-const ours = cls => emblem(S.settings.emblem, S.settings.teamName, cls);
-const theirs = (m, cls) => emblem(S.settings.opponents.find(o => o.id === m.opponentId)?.emblem, m.opponent, cls);
 const tourName = id => (id ? S.settings.tournaments?.find(t => t.id === id)?.name ?? '' : '');
+const cardCtx = () => ({ team: S.settings.teamName, teamEmblem: S.settings.emblem, oppEmblem: m => S.settings.opponents.find(o => o.id === m.opponentId)?.emblem, tourName });
 function greet() { const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; }
-const state = m => (m.over ? 'окончен' : m.events ? 'идёт' : 'не начат');
-// Детальный матч открывается в студии, быстрый — в быстрой статистике.
-const openUrl = m => (m.quick ? `quick.html#m=${m.id}` : `studio.html#m=${m.id}`);
 
 function card(m) {
-  const st = state(m), tour = tourName(m.tournament);
-  return `<a class="hcard" href="${openUrl(m)}">
-    <span class="hc-top">${ours('lg')}<span class="hc-score">${m.setsWon?.us ?? 0}<i>:</i>${m.setsWon?.them ?? 0}</span>${theirs(m, 'lg')}</span>
-    <span class="hc-name"><b>${esc(S.settings.teamName)} — ${esc(m.opponent)}</b><small>${new Date(m.created).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })}${tour ? ' · ' + esc(tour) : ''}</small></span>
-    <span class="hc-meta"><span class="pill ${st === 'идёт' ? 'live' : st === 'окончен' ? 'done' : ''}">${st}</span><span class="pill">${m.quick ? 'быстрая' : 'детальная'}</span><span>событий ${m.events}</span>${m.videos?.length ? `<span>${icon('i-film')} ${m.videos.length}</span>` : ''}</span>
-  </a>`;
+  const open = S.open === m.id;
+  return `<article class="mcard ${open ? 'open' : ''}">
+    <button class="mc-head" data-card="${m.id}" title="${open ? 'Свернуть' : 'Партии и режимы статистики'}">${matchHead(m, cardCtx())}</button>
+    ${open ? `${matchGrid(m)}<div class="mfoot"><button class="btn sm ghost danger" data-del="${m.id}">${icon('i-x')}Удалить матч</button></div>` : ''}
+  </article>`;
 }
-const act = (href, ic, title, sub, cls = '', key = '') => `<a class="hact ${cls}" href="${href}">${icon(ic)}<b>${title}${key ? `<span class="kbd">${key}</span>` : ''}</b><small>${sub}</small></a>`;
 const search = () => `<input class="hsearch" id="q" placeholder="Поиск: соперник или турнир" value="${esc(S.q)}">`;
-
-function view() {
-  const all = [...S.detail.map(m => ({ ...m, quick: false })), ...S.quick.map(m => ({ ...m, quick: true }))].sort((a, b) => b.created.localeCompare(a.created));
+const found = () => {
   const q = S.q.trim().toLowerCase();
-  const found = q ? all.filter(m => (m.opponent || '').toLowerCase().includes(q) || tourName(m.tournament).toLowerCase().includes(q)) : all;
-  if (S.view === 'team') {
-    const on = S.roster.filter(p => p.active !== false);
-    return `<div class="hhead"><h1>Команда</h1></div>
-      <div class="hteam">${ours('xl')}<span><b>${esc(S.settings.teamName)}</b><small>в составе ${on.length} · в запасе ${S.roster.length - on.length} · соперников ${S.settings.opponents.length}</small></span></div>
-      <div class="hroster">${on.sort((a, b) => (+a.num || 99) - (+b.num || 99)).map(p => `<span class="hplayer"><b>${esc(p.num ?? '')}</b>${esc(p.name)}<small>${ROLES[roleOf(p)]?.name ?? ''}</small></span>`).join('') || '<p class="muted">Игроков пока нет.</p>'}</div>
-      <div class="hactions">
-        ${act('studio.html#settings=team', 'i-users', 'Состав, форма, расстановки', 'игроки, цвета формы, Р1–Р6, зоны доводки')}
-        ${act('studio.html#settings=data', 'i-upload', 'Пакет команды', 'скачать или загрузить: состав, форма, расстановки, соперники')}
-      </div>`;
-  }
-  if (S.view === 'phone') {
-    const urls = S.qr?.urls ?? [];
-    return `<div class="hhead"><h1>Пульт для телефона</h1></div>
-      <p class="muted" style="max-width:560px">Телефон и ноутбук — в одной Wi-Fi сети. Откройте на телефоне адрес или наведите камеру на код: пульт быстрой или детальной статистики работает без установки.</p>
-      <div class="hphone">${S.qr?.qr ? `<img src="${S.qr.qr}" alt="QR-код адреса">` : ''}<span>${urls.map(u => `<b class="mono">${esc(u)}</b>`).join('') || '<b>Нет сети для телефона</b><small>Подключите ноутбук к Wi-Fi или точке доступа.</small>'}<small>На этом компьютере: ${esc(location.host)}</small></span></div>
-      <div class="hactions">
-        ${act('detailed.html', 'i-list', 'Пульт детальной статистики', 'каждое касание с телефона', '', '2')}
-        ${act('quick.html', 'i-bolt', 'Быстрая статистика', 'кто закончил розыгрыш и чем — для игры вживую', '', '1')}
-        ${act('detailed.html#settings', 'i-gear', 'Настройки пульта', 'состав, соперники, QR')}
-      </div>`;
-  }
-  if (S.view === 'all') {
-    const groups = new Map();
-    for (const m of found) { const k = m.tournament ?? ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); }
-    return `<div class="hhead"><h1>Все матчи</h1>${search()}<a class="btn primary" href="studio.html#new">${icon('i-plus')}Новый матч</a></div>
-      ${[...groups].map(([k, list]) => `<h3 class="hsec">${esc(k ? tourName(k) || 'Турнир' : 'Без турнира')} <small>${list.length}</small></h3><div class="hgrid">${list.map(card).join('')}</div>`).join('') || `<p class="muted">${q ? 'Ничего не нашлось.' : 'Матчей пока нет.'}</p>`}`;
-  }
-  const lastId = lastStudioMatch();
-  const last = S.detail.find(m => m.id === lastId) ?? S.detail[0];
+  return q ? S.matches.filter(m => (m.opponent || '').toLowerCase().includes(q) || tourName(m.tournament).toLowerCase().includes(q)) : S.matches;
+};
+const newBtn = () => `<button class="btn primary" data-new>${icon('i-plus')}Новый матч</button>`;
+// Что продолжить: последний открытый экран ввода, а если матча уже нет — самый свежий матч.
+function lastInput() {
+  const l = store.get('last', null), m = S.matches.find(x => x.id === l?.id);
+  if (m && MODES[l.mode]) return { m, mode: l.mode };
+  return S.matches[0] ? { m: S.matches[0], mode: S.matches[0].main } : null;
+}
+
+function viewRecent() {
+  const list = found(), last = lastInput();
   return `<div class="hhead"><h1>${greet()}${S.settings.teamName ? `, «${esc(S.settings.teamName)}»` : ''}</h1>${search()}</div>
     <div class="hactions">
-      ${act('studio.html#new', 'i-plus', 'Новый матч', 'в студии: видео, 3D, каждое касание', 'primary')}
-      ${last ? act(`studio.html#m=${last.id}`, 'i-play', 'Продолжить', `${esc(last.opponent)} · ${new Date(last.created).toLocaleDateString('ru')} · ${state(last)}`, '', '3') : act('studio.html', 'i-film', 'Студия', 'видео и 3D-площадка', '', '3')}
-      ${act('quick.html', 'i-bolt', 'Быстрая статистика', 'кто закончил розыгрыш и чем — вживую', 'mfirst', '1')}
-      ${act('detailed.html', 'i-phone', 'Пульт для телефона', 'детальная статистика с телефона', 'mfirst', '2')}
-      ${act('stats.html', 'i-chart', 'Аналитика', 'дашборд детальной статистики')}
+      <button class="hact primary" data-new>${icon('i-plus')}<b>Новый матч</b><small>соперник и формат</small></button>
+      ${last ? `<a class="hact" href="${MODES[last.mode].page}#m=${last.m.id}" data-go="${last.mode}">${icon('i-play')}<b>Продолжить</b><small>${esc(last.m.opponent)} · ${MODES[last.mode].name}</small></a>` : ''}
+      <a class="hact" href="#analytics">${icon('i-chart')}<b>Аналитика</b><small>по матчу или по всем сразу</small></a>
     </div>
-    <h3 class="hsec">${q ? 'Найдено' : 'Недавние'} <small>${found.length}</small>${!q && all.length > 8 ? '<button class="btn sm ghost" data-v="all">Все матчи</button>' : ''}</h3>
-    <div class="hgrid">${(q ? found : found.slice(0, 8)).map(card).join('') || `<div class="hempty"><b>${q ? 'Ничего не нашлось' : 'Матчей пока нет'}</b><small>${q ? 'Попробуйте другое название.' : 'Создайте первый матч — в студии по видео или быстрой статистикой вживую.'}</small></div>`}</div>`;
+    <h3 class="hsec">${S.q ? 'Найдено' : 'Недавние'} <small>${list.length}</small>${!S.q && list.length > 6 ? '<a class="btn sm ghost" href="#matches">Все матчи</a>' : ''}</h3>
+    <div class="mlist2">${(S.q ? list : list.slice(0, 6)).map(card).join('') || `<div class="hempty"><b>${S.q ? 'Ничего не нашлось' : 'Матчей пока нет'}</b><small>${S.q ? 'Попробуйте другое название.' : 'Создайте первый матч: соперник, формат, дальше выберете режим статистики.'}</small></div>`}</div>`;
+}
+function viewMatches() {
+  const groups = new Map();
+  for (const m of found()) { const k = m.tournament ?? ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); }
+  return `<div class="hhead"><h1>Матчи</h1>${search()}${newBtn()}</div>
+    ${[...groups].map(([k, list]) => `<h3 class="hsec">${esc(k ? tourName(k) || 'Турнир' : 'Без турнира')} <small>${list.length}</small></h3><div class="mlist2">${list.map(card).join('')}</div>`).join('') || `<p class="muted">${S.q ? 'Ничего не нашлось.' : 'Матчей пока нет.'}</p>`}`;
+}
+function viewTeam() {
+  const on = S.roster.filter(p => p.active !== false);
+  return `<div class="hhead"><h1>Команда</h1></div>
+    <div class="hteam">${emblem(S.settings.emblem, S.settings.teamName, 'xl')}<span><b>${esc(S.settings.teamName)}</b><small>в составе ${on.length} · в запасе ${S.roster.length - on.length} · соперников ${S.settings.opponents.length}</small></span></div>
+    <div class="hroster">${[...on].sort((a, b) => (+a.num || 99) - (+b.num || 99)).map(p => `<span class="hplayer"><b>${esc(p.num ?? '')}</b>${esc(p.name)}<small>${ROLES[roleOf(p)]?.name ?? ''}</small></span>`).join('') || '<p class="muted">Игроков пока нет.</p>'}</div>
+    <div class="hactions">
+      <button class="hact" data-set="team">${icon('i-users')}<b>Состав, форма, расстановки</b><small>игроки, цвета формы, Р1–Р6, зоны доводки</small></button>
+      <button class="hact" data-set="data">${icon('i-upload')}<b>Пакет команды</b><small>скачать или загрузить: состав, форма, расстановки, соперники</small></button>
+    </div>`;
 }
 
-const VIEWS = [['recent', 'Главная', 'i-cube'], ['all', 'Все матчи', 'i-list'], ['team', 'Команда', 'i-users'], ['phone', 'Телефон', 'i-phone']];
-function paint() {
+const NAV = [['recent', 'Главная', 'i-cube', ''], ['matches', 'Матчи', 'i-list', '#matches'], ['team', 'Команда', 'i-users', '#team'], ['analytics', 'Аналитика', 'i-chart', '#analytics']];
+function paintSide() {
+  $('home').classList.toggle('folded', S.folded);
+  $('hside').innerHTML = `<div class="hbrand"><img src="img/logo.svg" alt=""><span><b>Волей Метрика</b><small>${esc(S.settings.teamName || 'статистика волейбола')}</small></span>
+      <button class="hfold" data-fold title="${S.folded ? 'Закрепить меню' : 'Свернуть меню'}">${icon('i-panel')}</button></div>
+    ${NAV.map(([k, l, ic, h]) => `<a class="${S.view === k ? 'on' : ''}" href="${h || '#'}">${icon(ic)}${l}</a>${k === 'analytics' && S.view === k && S.sections.length ? `<div class="hsub">${S.sections.map(([id, t]) => `<a href="#" class="${S.section === id ? 'on' : ''}" data-sec="${id}">${esc(t)}</a>`).join('')}</div>` : ''}`).join('')}
+    <span class="grow"></span>
+    <button data-set="general">${icon('i-gear')}Настройки</button>`;
+}
+function paintMain() {
+  const el = $('hmain');
+  if (S.view === 'analytics') return;
   const focus = document.activeElement?.id === 'q' ? document.activeElement.selectionStart : null;
-  $('home').innerHTML = `<aside class="hside">
-      <div class="hbrand"><img src="img/logo.svg" alt=""><span><b>Волей Метрика</b><small>${esc(S.settings.teamName || 'статистика волейбола')}</small></span></div>
-      ${VIEWS.map(([k, l, ic]) => `<button class="${S.view === k ? 'on' : ''}" data-v="${k}">${icon(ic)}${l}</button>`).join('')}
-      <a href="stats.html">${icon('i-chart')}Аналитика</a>
-      <a href="quick-stats.html">${icon('i-bolt')}Дашборд быстрой</a>
-      <span class="grow"></span>
-      <a href="studio.html#settings">${icon('i-gear')}Настройки</a>
-    </aside>
-    <main class="hmain">${view()}</main>`;
+  el.innerHTML = { recent: viewRecent, matches: viewMatches, team: viewTeam }[S.view]();
   if (focus != null) { const q = $('q'); q.focus(); q.setSelectionRange(focus, focus); }
 }
+const paint = () => { paintSide(); paintMain(); };
 
+const analytics = createAnalytics({
+  matches: () => S.matches, settings: () => S.settings, cardCtx,
+  onSections: list => { S.sections = list; S.section = list[0]?.[0] ?? null; paintSide(); },
+});
+
+// ---------- Адрес ----------
+function route() {
+  const [name, id, src, set] = location.hash.slice(1).split('/');
+  const was = S.view;
+  S.view = ['matches', 'team', 'analytics'].includes(name) ? name : 'recent';
+  if (was === 'analytics' && S.view !== 'analytics') { analytics.stop(); S.sections = []; }
+  paintSide();
+  if (S.view === 'analytics') {
+    const el = $('hmain');
+    if (was !== 'analytics') el.innerHTML = '';
+    analytics.show(el, { ...(id && { match: id }), ...(MODES[src] && { src }), ...(set !== undefined && { set: +set }) });
+  } else paintMain();
+  $('hmain').scrollTop = 0;
+}
+addEventListener('hashchange', route);
+
+// ---------- Действия ----------
 document.addEventListener('click', e => {
-  const b = e.target.closest('[data-v]');
-  if (!b) return;
-  S.view = b.dataset.v; store.set('view', S.view); paint();
+  const t = e.target;
+  const fold = t.closest('[data-fold]');
+  if (fold) { S.folded = !S.folded; store.set('folded', S.folded); $('home').classList.remove('peek'); return paintSide(); }
+  const c = t.closest('[data-card]');
+  if (c) { S.open = S.open === c.dataset.card ? null : c.dataset.card; return paintMain(); }
+  if (t.closest('[data-new]')) return settings.newMatch();
+  const st = t.closest('[data-set]');
+  if (st && st.tagName === 'BUTTON' && st.closest('#home')) return settings.open(st.dataset.set);
+  const sec = t.closest('[data-sec]');
+  if (sec) { e.preventDefault(); S.section = sec.dataset.sec; paintSide(); return document.getElementById(sec.dataset.sec)?.scrollIntoView({ behavior: 'smooth' }); }
+  const del = t.closest('[data-del]');
+  if (del) {
+    const m = S.matches.find(x => x.id === del.dataset.del);
+    if (confirm(`Удалить матч с «${m.opponent}»? Вся его статистика переедет в корзину (data/trash).`)) fetch(`/api/matches/${m.id}`, { method: 'DELETE' }).then(refresh);
+    return;
+  }
+  // Запоминаем, где вводили, для «Продолжить».
+  const a = t.closest('a[href*="#m="]');
+  if (a) { const mode = MODE_KEYS.find(k => a.getAttribute('href').startsWith(MODES[k].page)), id = a.getAttribute('href').split('#m=')[1]; if (mode) store.set('last', { id, mode }); }
 });
-document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; paint(); } });
-addEventListener('keydown', e => {
-  if (e.target.matches?.('input, textarea, select') || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.code === 'Digit1') location.href = 'quick.html';
-  if (e.code === 'Digit2') location.href = 'detailed.html';
-  if (e.code === 'Digit3') location.href = document.querySelector('.hact[href^="studio.html#m="]')?.getAttribute('href') ?? 'studio.html';
-});
+document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; paintMain(); } });
+// Подсветка раздела аналитики при прокрутке.
+$('hmain').addEventListener('scroll', () => {
+  if (S.view !== 'analytics' || !S.sections.length) return;
+  const top = $('hmain').getBoundingClientRect().top + 130;
+  const cur = S.sections.filter(([id]) => { const el = document.getElementById(id); return el && el.getBoundingClientRect().top <= top; }).at(-1)?.[0] ?? S.sections[0][0];
+  if (cur !== S.section) { S.section = cur; document.querySelectorAll('.hsub a').forEach(a => a.classList.toggle('on', a.dataset.sec === cur)); }
+}, { passive: true });
+// Свёрнутое меню выезжает, когда мышь у левого края, и уезжает, когда она ушла.
+$('hedge').addEventListener('mouseenter', () => $('home').classList.add('peek'));
+document.addEventListener('mousemove', e => { if (e.clientX > 250) $('home').classList.remove('peek'); }, { passive: true });
+$('hunfold').addEventListener('mouseenter', () => $('home').classList.add('peek'));
+$('hunfold').addEventListener('click', () => { S.folded = false; store.set('folded', false); $('home').classList.remove('peek'); paintSide(); });
+
+// Окна настроек и нового матча — общий модуль со студией. Матча на главной нет (match, st = null).
+const ui = {
+  match: null, st: null,
+  get roster() { return S.roster; }, set roster(v) { S.roster = v; },
+  get settings() { return S.settings; }, set settings(v) { S.settings = v; },
+  get matches() { return S.matches; }, set matches(v) { S.matches = v; },
+};
+const settings = createSettings({ ui, onChanged: () => refresh(), onMatchCreated: m => { S.open = m.id; refresh(); } });
 
 const get = url => fetch(url).then(r => r.json()).catch(() => null);
-paint();
-Promise.all([get('/api/settings'), get('/api/roster'), get('/api/matches'), get('/api/matches?mode=quick'), get('/api/qr')]).then(([settings, roster, detail, quick, qr]) => {
-  Object.assign(S, { settings: { opponents: [], tournaments: [], ...(settings ?? {}) }, roster: roster ?? [], detail: detail ?? [], quick: quick ?? [], qr });
-  paint();
-});
-// Вернулись на вкладку (матч ввели на телефоне или в студии) — обновляем список.
-addEventListener('focus', () => Promise.all([get('/api/matches'), get('/api/matches?mode=quick')]).then(([d, q]) => { S.detail = d ?? S.detail; S.quick = q ?? S.quick; paint(); }));
+async function refresh() {
+  const [s, roster, matches] = await Promise.all([get('/api/settings'), get('/api/roster'), get('/api/matches')]);
+  Object.assign(S, { settings: { opponents: [], tournaments: [], ...(s ?? {}) }, roster: roster ?? [], matches: matches ?? [] });
+  S.view === 'analytics' ? paintSide() : paint();
+}
+await refresh();
+route();
+// Вернулись на вкладку (ввели статистику в студии или на телефоне) — обновляем.
+addEventListener('focus', refresh);

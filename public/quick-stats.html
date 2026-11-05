@@ -1,15 +1,4 @@
 <!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
-  <meta name="theme-color" content="#0a0b0d">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Быстрая аналитика · Волей Метрика</title>
-  <link rel="stylesheet" href="app.css">
-</head>
-<body class="min-h-dvh">
-  <main id="app" class="dash mx-auto max-w-[1200px] px-4 pt-4 pb-16 sm:px-8"></main>
-  <script type="module" src="quick-stats.js"></script>
-</body>
-</html>
+<!-- Аналитика живёт в основном окне программы; старые ссылки ведут туда. -->
+<meta charset="utf-8"><title>Аналитика</title>
+<script>const m = location.hash.match(/m=([a-z0-9]+)/)?.[1]; location.replace('/#analytics' + (m ? '/' + m : ''));</script>

@@ -25,7 +25,7 @@ const canvasTex = (c, { srgb = true, aniso = 4 } = {}) => {
 };
 
 // Подпись над игроком: кружок для номера, «таблетка» для имени. Возвращает текстуру и пропорцию.
-function labelTexture(text, { bg = '#e9eaec', fg = '#111', ring = null } = {}) {
+function labelTexture(text, { bg = 'rgba(14,16,20,.55)', fg = '#f2f3f5', ring = null } = {}) {
   const H = 96, c = document.createElement('canvas'), g = c.getContext('2d');
   const font = `600 ${text.length > 2 ? 46 : 58}px Inter, system-ui, sans-serif`;
   g.font = font;
@@ -316,14 +316,16 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   }
   let detail = 'real';
 
-  // Подписи: 'num' — номер, 'name' — имя, 'full' — как записан в составе (номер и имя), 'none' — без подписи.
+  // Номер на форме: настоящий (0 — тоже номер), а если поле пустое — порядковый в составе. Номер есть всегда.
+  const numberOf = p => (p.num != null && p.num !== '' ? p.num : p.seq ?? '');
+  // Подписи: 'num' — номер, 'name' — три буквы имени, 'full' — номер и три буквы, 'none' — без подписи.
   let labelMode = 'num';
   const labelText = info => {
-    const num = info.num ? String(info.num) : '', name = (info.name || '').trim(); // 0 — номер не задан
+    const num = String(numberOf(info)), name = (info.name || '').trim().slice(0, 3); // на плашке — первые три буквы
     if (labelMode === 'none') return '';
-    if (labelMode === 'name') return name.split(/\s+/)[0] || num || String(info.label ?? '');
-    if (labelMode === 'full') return [num, name].filter(Boolean).join(' ') || String(info.label ?? '');
-    return num || name.split(/\s+/)[0] || String(info.label ?? '');
+    if (labelMode === 'name') return name || num;
+    if (labelMode === 'full') return [num, name].filter(Boolean).join(' ');
+    return num;
   };
   function paintLabel(g, info) {
     const u = g.userData, text = labelText(info);
@@ -333,7 +335,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     u.sprite.material.map?.dispose();
     const { tex, aspect } = labelTexture(text);
     u.sprite.material.map = tex; u.sprite.material.needsUpdate = true;
-    const h = aspect > 1.05 ? 0.44 : 0.6;
+    const h = 0.026; // размер на экране, не зависит от близости к камере
     u.sprite.scale.set(h * aspect, h, 1);
   }
 
@@ -342,7 +344,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     const hit = new THREE.Mesh(G.hit, MAT.hit); // невидимый «корпус» для клика
     hit.position.y = 1.0; hit.userData.pid = p.id;
     g.add(hit);
-    const numTex = p.num ? numberTexture(p.num, kit.number) : null;
+    const numTex = numberTexture(numberOf(p), kit.number);
     const rig = buildFigure(g, { detail, M: FM, numTex, id: p.id });
     // Пятно-тень под ногами: на полу всегда, в прыжке — бледнее и меньше.
     const bm = MAT.blob.clone(); bm.userData = {};
@@ -355,7 +357,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     const ring = new THREE.Mesh(G.ring, new THREE.MeshBasicMaterial({ color: COLORS.coral, transparent: true, opacity: 0 }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01;
     g.add(ring);
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false }));
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, sizeAttenuation: false, transparent: true }));
     sprite.position.y = 2.32; sprite.renderOrder = 10;
     g.add(sprite);
     g.userData = { body: hit, rig, jersey: rig.jersey, ring, glow, sprite, blob, key: tokenKey(p), phase: Math.random() * 6, act: null, actKey: null, seed: Math.random() * 10, P: { ...READY } };
@@ -363,7 +365,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     scene.add(g);
     return g;
   }
-  const tokenKey = p => `${p.num ?? ''}|${kit.number}|${detail}`;
+  const tokenKey = p => `${numberOf(p)}|${kit.number}|${detail}`;
   // Удаление фигуры: свои материалы и текстуры освобождаем, общие геометрии и материалы — нет.
   const shared = new Set([...sharedFigureGeometries(), ...Object.values(G)]);
   function disposeToken(g) {

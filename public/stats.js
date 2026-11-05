@@ -1,10 +1,10 @@
-// Дашборд детальной статистики: обзор, ход партии, тепловые карты, отчёт связующего,
-// расстановки, игроки. Всё считается из «розыгрыша по касаниям» (plays) движка — с фильтрами.
+// Аналитика детальных режимов (Студия PRO, Ручной PRO): обзор, ход партии, тепловые карты, отчёт связующего,
+// расстановки, игроки. Всё считается из «розыгрыша по касаниям» (plays) движка. Встраивается в раздел «Аналитика» (analytics.js).
 import { replay, totals, newPlayer, playerName, addStats, ACTIONS, LABELS, REC_RATING, attEff, recRating, SKILLS, timeoutEffect } from './engine.js';
 import { slotZones, zoneOfSlot, SYSTEMS, zoneOf, TEMPOS, NET } from './court.js';
 import { courtBase, heat, svgWrap, sx, sy } from './studio/court2d.js';
 
-const $app = document.getElementById('app');
+let $app = null, $extras = null, timer = null;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const P = (a, b) => (b ? Math.round((100 * a) / b) : null);
 const pc = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '–');
@@ -21,22 +21,19 @@ const dirKey = d => (d === 1 || d === 5 || d === '1' || d === '5' ? 'back' : d =
 const OUT_COLOR = { us: '#59d499', them: '#ff6363', null: '#a0a3aa' };
 const REC_LABEL = { pp: '++', pm: '+', p: '−', trans: 'Переход' };
 
-let F = { tour: 'all', opp: 'all', match: null, set: 'all', player: 'all', rot: 'all', phase: 'all', skill: 'att', dots: true, heat: true, traj: false, setter: null, sort: 'points' };
+let F = { src: 'studio', tour: 'all', opp: 'all', match: 'all', set: 'all', player: 'all', rot: 'all', phase: 'all', skill: 'att', dots: true, heat: true, traj: false, setter: null, sort: 'points' };
 let DATA = null;
 
 // ---------- Данные ----------
 async function load() {
-  const [settings, matches] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/matches?full').then(r => r.json())]);
-  DATA = { settings, matches, sig: sig(matches) };
+  const [settings, matches] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch(`/api/matches?full&src=${F.src}`).then(r => r.json())]);
+  DATA = { settings, matches: matches.filter(m => m.events.length), sig: sig(matches) };
 }
-const sig = ms => ms.map(m => m.id + ':' + (m.events?.length ?? m.events)).join('|');
+const sig = ms => ms.map(m => m.id + ':' + m.events.length).join('|');
 
 function view() {
   const { matches, settings } = DATA;
   const cands = matches.filter(m => (F.opp === 'all' || m.opponentId === F.opp) && (F.tour === 'all' || (F.tour === 'none' ? !m.tournament : m.tournament === F.tour)));
-  const hashM = location.hash.match(/m=([a-z0-9]+)/)?.[1];
-  if (F.match === null) F.match = hashM && cands.some(m => m.id === hashM) ? hashM : cands[0]?.id ?? 'all';
-  if (F.match !== 'all' && !cands.some(m => m.id === F.match)) F.match = 'all';
   const rows = cands.filter(m => F.match === 'all' || m.id === F.match).map(m => ({ m, st: replay(m) }));
   const people = Object.values(Object.fromEntries(rows.flatMap(({ m }) => m.roster).map(p => [p.id, p])));
   const nm = id => esc(playerName({ roster: people }, id));
@@ -49,7 +46,7 @@ function view() {
 }
 
 // ---------- Подсказки ----------
-const tip = document.getElementById('tip');
+const tip = document.getElementById('tip') ?? document.body.appendChild(Object.assign(document.createElement('div'), { id: 'tip', className: 'tip' }));
 document.addEventListener('mousemove', e => {
   const el = e.target.closest('[data-tip]');
   if (!el) return tip.classList.remove('on');
@@ -61,20 +58,12 @@ document.addEventListener('mousemove', e => {
 
 // ---------- Фильтры ----------
 function filters(v) {
-  const { settings, cands, rows } = v;
   const sel = (k, opts, label) => `<label>${label}<select data-f="${k}">${opts.map(([val, t]) => `<option value="${val}" ${String(F[k]) === String(val) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
-  const maxSets = Math.max(0, ...rows.map(r => r.st.sets.length));
   const people = [...v.people].sort((a, b) => a.num - b.num);
-  const tours = settings.tournaments ?? [];
   return [
-    ...(tours.length ? [sel('tour', [['all', 'Все турниры'], ...tours.map(t => [t.id, t.name]), ['none', 'Без турнира']], 'Турнир')] : []),
-    sel('opp', [['all', 'Все соперники'], ...settings.opponents.map(o => [o.id, o.name])], 'Соперник'),
-    sel('match', [['all', `Все матчи (${cands.length})`], ...cands.map(m => [m.id, `${dt(m)} · ${m.opponent}`])], 'Матч'),
-    sel('set', [['all', 'Все партии'], ...Array.from({ length: maxSets }, (_, i) => [i, `Партия ${i + 1}`])], 'Партия'),
     sel('rot', [['all', 'Все'], ...[1, 2, 3, 4, 5, 6].map(r => [r, `Р${r}`])], 'Расстановка'),
     sel('phase', [['all', 'Все розыгрыши'], ['so', 'Сайд-аут (подают они)'], ['brk', 'Брейк (подаём мы)']], 'Фаза'),
     sel('player', [['all', 'Вся команда'], ...people.map(p => [p.id, playerName({ roster: people }, p.id)])], 'Игрок'),
-    '<span class="grow"></span><span class="muted" style="font-size:12px">обновляется само</span>',
   ].join('');
 }
 
@@ -508,21 +497,37 @@ function scoutSection(v) {
 
 // ---------- Отрисовка ----------
 function render() {
-  if (!DATA.matches.length) {
-    document.getElementById('filters').innerHTML = '';
-    $app.innerHTML = '<div class="empty" style="margin-top:40px">Матчей детальной статистики пока нет. Создайте матч в <a href="studio.html" style="color:var(--sky)">студии</a> или на пульте телефона.</div>';
-    return;
-  }
+  if (!$app?.isConnected) return;
+  if (!DATA.matches.length) { $extras.innerHTML = ''; $app.innerHTML = '<div class="hempty"><b>В этом режиме пока нет статистики</b></div>'; return; }
   const v = view();
-  document.getElementById('filters').innerHTML = filters(v);
-  const y = scrollY;
-  $app.innerHTML = overview(v) + flow(v) + heatSection(v) + setterSection(v) + rotSection(v) + playersSection(v) + scoutSection(v) + toursSection(v);
-  scrollTo(0, y);
+  $extras.innerHTML = filters(v);
+  const scroller = $app.closest('.hmain'), y = scroller?.scrollTop;
+  $app.innerHTML = overview(v) + flow(v) + (F.src === 'studio' ? heatSection(v) : '') + setterSection(v) + rotSection(v) + playersSection(v) + scoutSection(v) + toursSection(v);
+  if (scroller) scroller.scrollTop = y;
 }
+// Разделы для бокового меню: какие есть в этом режиме.
+export const sections = src => [['overview', 'Обзор'], ['flow', 'Ход партии'], ...(src === 'studio' ? [['heat', 'Тепловые карты']] : []), ['setter', 'Связующий'], ['rot', 'Расстановки'], ['players', 'Игроки'], ['scout', 'Соперник'], ['tours', 'Турниры']];
+// Показать: A — общие фильтры раздела «Аналитика» (режим, турнир, соперник, матч, партия).
+export async function show(body, extras, A) {
+  stop();
+  $app = body; $extras = extras;
+  const keep = F.src === A.src && DATA;
+  Object.assign(F, { src: A.src, tour: A.tour, opp: A.opp, match: A.match, set: A.set });
+  if (!keep) await load();
+  render();
+  timer = setInterval(async () => {
+    if (document.hidden || document.activeElement?.tagName === 'SELECT' || !$app?.isConnected) return;
+    const list = await fetch(`/api/matches?full&src=${F.src}`).then(r => r.json()).catch(() => null);
+    if (!list || sig(list) === DATA.sig) return;
+    await load();
+    render();
+  }, 4000);
+}
+export function stop() { clearInterval(timer); timer = null; }
 
 document.addEventListener('change', e => {
   const f = e.target.dataset.f, tg = e.target.dataset.toggle;
-  if (f) { F[f] = e.target.value; if (f === 'opp' || f === 'tour') F.match = null; if (f === 'match' && e.target.value !== 'all') history.replaceState(null, '', '#m=' + e.target.value); render(); }
+  if (f) { F[f] = e.target.value; render(); }
   if (tg) { F[tg] = e.target.checked; render(); }
 });
 document.addEventListener('click', e => {
@@ -532,19 +537,8 @@ document.addEventListener('click', e => {
   if (s) { F.sort = s.dataset.sort; render(); }
 });
 
-await load();
-render();
-// Обновляемся, только если матчи поменялись (новые события с пульта или из студии).
-setInterval(async () => {
-  if (document.hidden || document.activeElement?.tagName === 'SELECT') return;
-  const list = await fetch('/api/matches').then(r => r.json()).catch(() => null);
-  if (!list || sig(list) === DATA.sig) return;
-  await load();
-  render();
-}, 4000);
-
 // ---------- Экспорт: касания по текущим фильтрам в CSV (Excel открывает с разделителем «;») ----------
-document.getElementById('csvBtn').addEventListener('click', () => {
+export function exportCsv() {
   const v = view();
   const head = ['Матч', 'Соперник', 'Партия', 'Розыгрыш', 'Счёт', 'Расстановка', 'Подача', 'Игрок', 'Навык', 'Результат', 'Темп', 'Куда пас', 'Кому пас', 'Откуда x', 'Откуда y', 'Куда x', 'Куда y', 'Время видео', 'Розыгрыш выигран'];
   const byId = Object.fromEntries(v.rows.map(r => [r.m.id, r.m]));
@@ -560,4 +554,4 @@ document.getElementById('csvBtn').addEventListener('click', () => {
   a.download = `volleyball-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-});
+}

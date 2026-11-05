@@ -1,17 +1,15 @@
-// Дашборд быстрой статистики. Собирается из блоков; какие блоки и колонки показывать —
-// настраивается кнопкой «Настроить дашборд» и хранится в настройках на сервере (settings.quickDash).
-// Обновляется сам каждые 3 секунды, фильтры — по сопернику и матчу.
+// Аналитика режима «Экспресс stat». Собирается из блоков; какие блоки и колонки показывать —
+// настраивается кнопкой «Настроить блоки» и хранится в настройках на сервере (settings.quickDash).
+// Встраивается в раздел «Аналитика» (analytics.js), обновляется сама каждые 3 секунды.
 import { setTitle } from './engine.js';
 import { replayQuick, quickTotals, newQuickPlayer, newQuickTeam, RESULTS, PLAYER_POINTS, PLAYER_ERRORS } from './quick-engine.js';
 import { playerName, addStats, pct } from './engine.js';
 
-const $app = document.getElementById('app');
-// oppFilter: 'all' или id соперника; matchSel: 'all' или id матча (по умолчанию — последний матч).
-let oppFilter = 'all', matchSel = null, scope = 'all', sortKey = 'points';
+let $app = null, $extras = null, timer = null, A = null, sortKey = 'points';
 let settings = null, draft = null; // draft — настройка дашборда, пока открыта панель «Настроить»
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const z = v => (v ? v : '<span class="text-smoke">·</span>'); // ноль показываем тихой точкой, чтобы цифры читались
+const z = v => (v ? v : '<span class="muted">·</span>'); // ноль показываем тихой точкой, чтобы цифры читались
 const signed = v => `<span class="${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${v > 0 ? '+' : ''}${v}</span>`;
 const date = m => new Date(m.created).toLocaleDateString('ru');
 const kpi = (t, v, s = '') => `<div class="kpi"><div class="t">${t}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
@@ -82,7 +80,7 @@ const BLOCKS = {
     render: c => `<div class="leaders">${[
       ['Больше всего очков', p => quickTotals(p).points], ['Атака', p => p.kill], ['Блок', p => p.block], ['Эйсы', p => p.ace],
     ].map(([t, get]) => `<div class="kpi"><div class="t">${t}</div>
-      ${top(c, get).map((x, i) => `<div class="lead"><span><span class="meta mr-2">${i + 1}</span>${nameOf(c, x.id)}</span><b>${x.v}</b></div>`).join('') || '<div class="muted small">—</div>'}
+      ${top(c, get).map((x, i) => `<div class="lead"><span><span class="muted">${i + 1}</span>${nameOf(c, x.id)}</span><b>${x.v}</b></div>`).join('') || '<div class="muted small">—</div>'}
     </div>`).join('')}</div>`,
   },
   errors: {
@@ -106,7 +104,7 @@ const BLOCKS = {
       const cell = (col, p) => `<td class="${col.bold ? 'b' : ''}">${col.fmt ? col.fmt(col.get(p, c)) : z(col.get(p, c))}</td>`;
       return `<p class="muted small" style="margin:0 0 8px"><span class="pos">Зелёные</span> — очки, которые игрок принёс.
         <span class="neg">Красные</span> — очки, отданные сопернику ошибкой. Нажмите на заголовок, чтобы отсортировать.</p>
-        <div class="tablewrap"><table class="table">
+        <div class="tablewrap"><table class="t">
         <thead><tr><th class="l">Игрок</th>${cols.map(col => `<th class="sort ${col.kind} ${col.id === sortKey ? 'on' : ''}" data-sort="${col.id}">${col.title}</th>`).join('')}</tr></thead>
         <tbody>${ids.map(id => `<tr><td class="l">${nameOf(c, id)}</td>${cols.map(col => cell(col, c.players[id])).join('')}</tr>`).join('')
           || `<tr><td colspan="${cols.length + 1}" class="muted">Пока нет розыгрышей с игроками</td></tr>`}</tbody>
@@ -127,7 +125,7 @@ const BLOCKS = {
       const body = c.single
         ? c.single.st.sets.map(s => line(setTitle(s.n, c.single.st.format, s.target), `${s.us}:${s.them}`, c.single.st, s.n)).join('')
         : c.rows.map(({ m, st }) => line(`${esc(m.opponent)}, ${date(m)}`, `${st.setsWon.us}:${st.setsWon.them}`, st, 'all')).join('');
-      return `<div class="tablewrap"><table class="table"><thead><tr><th class="l">${c.single ? 'Партия' : 'Матч'}</th>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+      return `<div class="tablewrap"><table class="t"><thead><tr><th class="l">${c.single ? 'Партия' : 'Матч'}</th>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
     },
   },
   runs: {
@@ -156,12 +154,12 @@ const BLOCKS = {
   },
   matches: {
     title: 'Список матчей', hint: 'Когда выбрано несколько матчей — с кнопкой «Открыть»',
-    render: c => (c.single ? '' : `<div class="tablewrap"><table class="table">
+    render: c => (c.single ? '' : `<div class="tablewrap"><table class="t">
       <thead><tr><th class="l">Дата</th><th class="l">Соперник</th><th>Партии</th><th class="l">Счёт по партиям</th><th></th></tr></thead>
       <tbody>${c.rows.map(({ m, st }) => `<tr>
         <td class="l">${date(m)}</td><td class="l">${esc(m.opponent)}</td><td><b>${st.setsWon.us} : ${st.setsWon.them}</b></td>
         <td class="l">${st.sets.map(s => `${s.us}:${s.them}`).join(', ') || '—'}</td>
-        <td><button class="btn btn-sm" data-match="${m.id}">Открыть</button></td></tr>`).join('')}</tbody>
+        <td><button class="btn sm" data-match="${m.id}">Открыть</button></td></tr>`).join('')}</tbody>
     </table></div>`),
   },
 };
@@ -176,7 +174,7 @@ const DEFAULT_DASH = {
 const ALL_COLUMNS = COLUMNS.map(c => c.id);
 const KNOWN_BEFORE_RULE = ['points', 'kill', 'block', 'ace', 'errors', 'srvErr', 'attErr', 'blocked', 'recErr', 'fault', 'diff', 'share'];
 function dashConfig() {
-  const d = settings?.quickDash || DEFAULT_DASH;
+  const d = settings?.quickDash || DEFAULT_DASH; // settings может ещё не загрузиться
   const known = d.known || KNOWN_BEFORE_RULE;
   const on = new Set([...d.columns, ...ALL_COLUMNS.filter(id => !known.includes(id))]);
   return { blocks: d.blocks.filter(id => BLOCKS[id]), columns: ALL_COLUMNS.filter(id => on.has(id)) };
@@ -194,14 +192,14 @@ function viewConfig() {
       const k = draft.blocks.indexOf(id);
       return `<div class="cfg-row ${on ? '' : 'off'}">
         <label><input type="checkbox" data-block="${id}" ${on ? 'checked' : ''}><span><b>${BLOCKS[id].title}</b><small>${BLOCKS[id].hint}</small></span></label>
-        ${on ? `<button class="btn btn-sm" data-move="${id}" data-dir="-1" ${k === 0 ? 'disabled' : ''}>↑</button>
-                <button class="btn btn-sm" data-move="${id}" data-dir="1" ${k === draft.blocks.length - 1 ? 'disabled' : ''}>↓</button>` : ''}
+        ${on ? `<button class="btn sm" data-move="${id}" data-dir="-1" ${k === 0 ? 'disabled' : ''}>↑</button>
+                <button class="btn sm" data-move="${id}" data-dir="1" ${k === draft.blocks.length - 1 ? 'disabled' : ''}>↓</button>` : ''}
       </div>`;
     }).join('')}
     <h2>Колонки таблицы игроков</h2>
     <div class="cfg-cols">${COLUMNS.map(col => `<label class="${col.kind}"><input type="checkbox" data-col="${col.id}" ${draft.columns.includes(col.id) ? 'checked' : ''}>${col.title}</label>`).join('')}</div>
     <div class="pair" style="margin-top:16px">
-      <button class="btn btn-primary" data-cfg="save">Сохранить</button>
+      <button class="btn primary" data-cfg="save">Сохранить</button>
       <button class="btn" data-cfg="cancel">Отмена</button>
     </div>
     <button class="btn btn-ghost" data-cfg="reset" style="margin-top:6px">Вернуть как было по умолчанию</button>
@@ -212,17 +210,14 @@ function viewConfig() {
 
 async function refresh() {
   // Не перерисовываем, пока открыт выпадающий список или панель настройки — иначе они закроются под рукой.
-  if (draft || document.activeElement?.tagName === 'SELECT') return;
-  const [s, matches] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/matches?full&mode=quick').then(r => r.json())]);
+  if (!$app?.isConnected || draft || document.activeElement?.tagName === 'SELECT') return;
+  const [s, matches] = await Promise.all([fetch('/api/settings').then(r => r.json()), fetch('/api/matches?full&src=express').then(r => r.json())]);
   settings = s;
 
-  const candidates = matches.filter(m => oppFilter === 'all' || m.opponentId === oppFilter);
-  const hashM = location.hash.match(/m=([a-z0-9]+)/)?.[1]; // #m=id — дашборд именно этого матча (ссылка из пульта)
-  if (matchSel === null) matchSel = hashM && candidates.some(m => m.id === hashM) ? hashM : candidates[0]?.id ?? 'all';
-  if (matchSel !== 'all' && !candidates.some(m => m.id === matchSel)) matchSel = 'all';
-  const rows = candidates.filter(m => matchSel === 'all' || m.id === matchSel).map(m => ({ m, st: replayQuick(m) }));
+  const candidates = matches.filter(m => m.events.length && (A.opp === 'all' || m.opponentId === A.opp) && (A.tour === 'all' || (A.tour === 'none' ? !m.tournament : m.tournament === A.tour)));
+  const rows = candidates.filter(m => A.match === 'all' || m.id === A.match).map(m => ({ m, st: replayQuick(m) }));
   const single = rows.length === 1 ? rows[0] : null;
-  if (!single || (scope !== 'all' && !single.st.sets[scope])) scope = 'all';
+  const scope = single && A.set !== 'all' && single.st.sets[A.set] ? A.set : 'all';
 
   // Собираем всё, что нужно блокам, один раз.
   const players = {}, team = newQuickTeam(), rallies = [];
@@ -244,31 +239,12 @@ async function refresh() {
     teamPoints: quickTotals(total).points, dash: dashConfig(),
   };
 
-  const title = single
-    ? `${esc(settings.teamName)} ${single.st.setsWon.us} : ${single.st.setsWon.them} ${esc(single.m.opponent)}`
-    : `${esc(settings.teamName)}: быстрая статистика`;
-
-  paint(`
-    <div class="topbar">
-      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Режимы</a>
-      <span class="flex gap-2"><a class="btn btn-ghost btn-sm" href="quick.html">Пульт</a><button class="btn btn-sm" data-cfg="open">Настроить дашборд</button></span>
-    </div>
-    <h1>${title}</h1>
-    <div class="filters">
-      <select id="opp"><option value="all">Все соперники</option>
-        ${settings.opponents.map(o => `<option value="${o.id}" ${o.id === oppFilter ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
-      <select id="match"><option value="all">Все матчи (${candidates.length})</option>
-        ${candidates.map(m => `<option value="${m.id}" ${m.id === matchSel ? 'selected' : ''}>${esc(m.opponent)}, ${date(m)}</option>`).join('')}</select>
-    </div>
-    ${single ? `<div class="tabs">
-        <button class="btn btn-sm ${scope === 'all' ? 'btn-primary' : ''}" data-scope="all">Весь матч</button>
-        ${single.st.sets.map(s => `<button class="btn btn-sm ${scope === s.n ? 'btn-primary' : ''}" data-scope="${s.n}">${setTitle(s.n, single.st.format, s.target).replace(/ \(до \d+\)/, '')} <span class="num text-ash">${s.us}:${s.them}</span></button>`).join('')}
-      </div>` : ''}
-    ${!rows.length ? '<p class="muted">Пока нет матчей быстрой статистики.</p>'
-      : ctx.dash.blocks.map(id => {
-        const html = BLOCKS[id].render(ctx);
-        return html ? `<section><h2>${BLOCKS[id].title}</h2>${html}</section>` : '';
-      }).join('')}`);
+  $extras.innerHTML = '<button class="btn sm" data-cfg="open">Настроить блоки</button>';
+  paint(!rows.length ? '<div class="hempty"><b>В этом режиме пока нет статистики</b></div>'
+    : ctx.dash.blocks.map(id => {
+      const html = BLOCKS[id].render(ctx);
+      return html ? `<section class="dsec" id="x-${id}"><h2>${BLOCKS[id].title}</h2>${html}</section>` : '';
+    }).join(''));
 }
 
 // Перерисовываем, только если что-то изменилось, и сохраняем горизонтальную прокрутку таблиц —
@@ -283,7 +259,7 @@ function paint(html) {
 
 function renderConfig() {
   lastHtml = ''; // после закрытия панели дашборд должен нарисоваться заново
-  $app.innerHTML = `<div class="topbar"><a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Режимы</a></div><h1>Настройка дашборда</h1>${viewConfig()}`;
+  $app.innerHTML = `<section class="dsec"><h2>Настройка блоков</h2>${viewConfig()}</section>`;
 }
 
 async function saveDash(dash) {
@@ -292,7 +268,7 @@ async function saveDash(dash) {
 
 // ---------- События ----------
 
-$app.addEventListener('change', e => {
+const onChange = e => {
   const t = e.target;
   if (draft && t.dataset.block) {
     const id = t.dataset.block;
@@ -306,19 +282,13 @@ $app.addEventListener('change', e => {
     draft.columns = COLUMNS.map(c => c.id).filter(id => on.has(id));
     return;
   }
-  if (t.id === 'opp') { oppFilter = t.value; matchSel = 'all'; }
-  if (t.id === 'match') matchSel = t.value;
-  scope = 'all';
-  t.blur();
-  refresh();
-});
+};
 
-$app.addEventListener('click', async e => {
-  const el = e.target.closest('[data-scope],[data-match],[data-sort],[data-move],[data-cfg]');
+const onClick = async e => {
+  const el = e.target.closest('[data-match],[data-sort],[data-move],[data-cfg]');
   if (!el || el.disabled) return;
   const d = el.dataset;
-  if (d.scope !== undefined) { scope = d.scope === 'all' ? 'all' : Number(d.scope); return refresh(); }
-  if (d.match) { matchSel = d.match; scope = 'all'; return refresh(); }
+  if (d.match) return A.pickMatch(d.match);
   if (d.sort) { sortKey = d.sort; return refresh(); }
   if (d.move) {
     const k = draft.blocks.indexOf(d.move), j = k + Number(d.dir);
@@ -327,18 +297,23 @@ $app.addEventListener('click', async e => {
   }
   if (d.cfg === 'open') { draft = structuredClone(dashConfig()); return renderConfig(); }
   if (d.cfg === 'reset') { draft = structuredClone(DEFAULT_DASH); return renderConfig(); }
-  if (d.cfg === 'cancel') { draft = null; history.replaceState(null, '', location.pathname); return refresh(); }
+  if (d.cfg === 'cancel') { draft = null; return refresh(); }
   if (d.cfg === 'save') {
     try { await saveDash(draft); } catch { return alert('Не удалось сохранить — нет связи с компьютером'); }
     draft = null;
-    history.replaceState(null, '', location.pathname);
     return refresh();
   }
-});
+};
 
-// #config — сразу открыть настройку (ссылка из «Настроек»).
-(async () => {
+// Разделы для бокового меню: включённые блоки.
+export const sections = () => dashConfig().blocks.map(id => ['x-' + id, BLOCKS[id].title]);
+export async function show(body, extras, filters) {
+  stop();
+  $app = body; $extras = extras; A = filters; lastHtml = ''; draft = null;
+  $extras.addEventListener('click', onClick);
+  $app.addEventListener('click', onClick);
+  $app.addEventListener('change', onChange);
   await refresh();
-  if (location.hash === '#config') { draft = structuredClone(dashConfig()); renderConfig(); }
-})();
-setInterval(refresh, 3000);
+  timer = setInterval(refresh, 3000);
+}
+export function stop() { clearInterval(timer); timer = null; }

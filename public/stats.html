@@ -1,26 +1,4 @@
 <!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <link rel="icon" href="img/logo.svg" type="image/svg+xml">
-  <meta name="theme-color" content="#0a0b0d">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Аналитика · Волей Метрика</title>
-  <link rel="stylesheet" href="studio/dash.css">
-</head>
-<body class="dash2">
-  <header class="dtop">
-    <a class="brand" href="/"><img class="brandmark" src="img/logo.svg" alt=""><span class="bname"><b>Волей Метрика</b><small>Аналитика</small></span></a>
-    <nav class="dnav" id="nav">
-      <a href="#overview">Обзор</a><a href="#flow">Ход партии</a><a href="#heat">Тепловые карты</a>
-      <a href="#setter">Связующий</a><a href="#rot">Расстановки</a><a href="#players">Игроки</a><a href="#scout">Соперник</a><a href="#tours">Турниры</a>
-    </nav>
-    <button class="btn-chip" id="csvBtn" title="Все касания по фильтрам — таблица для Excel / Google Таблиц">⤓ CSV</button>
-    <a class="btn-chip" href="studio.html">Открыть студию</a>
-  </header>
-  <div class="dfilters" id="filters"></div>
-  <main class="dmain" id="app"><p class="muted" style="padding:40px">Загрузка…</p></main>
-  <div class="tip" id="tip"></div>
-  <script type="module" src="stats.js"></script>
-</body>
-</html>
+<!-- Аналитика живёт в основном окне программы; старые ссылки ведут туда. -->
+<meta charset="utf-8"><title>Аналитика</title>
+<script>const m = location.hash.match(/m=([a-z0-9]+)/)?.[1]; location.replace('/#analytics' + (m ? '/' + m : ''));</script>
