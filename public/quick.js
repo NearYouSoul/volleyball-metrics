@@ -31,11 +31,12 @@ async function call(fn) {
   render();
 }
 
+let pushed = false; // запись истории «матч» создали мы — выходить из матча можно кнопкой «Назад» браузера
 function setMatch(match) {
   const changed = ui.match?.id !== match.id;
   ui.match = match;
   ui.st = replayQuick(match);
-  location.hash = 'm=' + match.id;
+  if (location.hash !== '#m=' + match.id) { location.hash = 'm=' + match.id; pushed = true; }
   if (changed) sync.attach(match);
 }
 
@@ -178,7 +179,7 @@ function viewLive() {
   return `
     <nav class="mb-3 flex items-center justify-between">
       ${back('home', 'Матчи')}
-      <a class="btn btn-ghost btn-sm -mr-3" href="quick-stats.html" target="_blank">Дашборд</a>
+      <a class="btn btn-ghost btn-sm -mr-3" href="quick-stats.html#m=${ui.match.id}">Дашборд</a>
     </nav>
     ${viewBoard()}
     <div class="my-3 flex min-h-11 items-center gap-3">
@@ -247,7 +248,8 @@ const createMatch = async opponentId => {
 };
 
 const handlers = {
-  home: () => call(goHome),
+  // Из матча выходим «Назад» браузера, чтобы не копить записи истории; переход на список делает hashchange.
+  home: () => { if (pushed && ui.match && location.hash.includes('m=')) { pushed = false; history.back(); } else call(goHome); },
   pickOpponent: () => {
     if (!ui.roster.length) {
       if (confirm('В составе нет игроков. Открыть настройки?')) location.href = 'detailed.html#settings';
@@ -317,6 +319,13 @@ setInterval(async () => {
     if (JSON.stringify(m.events) !== JSON.stringify(ui.match.events)) { setMatch(m); render(); }
   } catch { /* сеть моргнула — попробуем в следующий раз */ }
 }, 3000);
+
+// «Назад»/«Вперёд» браузера: адрес с m= открывает матч, без него — список матчей.
+addEventListener('hashchange', () => {
+  const id = location.hash.match(/m=([a-z0-9]+)/)?.[1];
+  if (id && id !== ui.match?.id) call(() => openMatch(id));
+  else if (!id && ui.match) call(goHome);
+});
 
 // Если страницу перезагрузили посреди матча — открываем его снова.
 const hashId = location.hash.match(/m=([a-z0-9]+)/)?.[1];

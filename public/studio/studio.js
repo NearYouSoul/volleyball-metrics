@@ -59,6 +59,11 @@ function toast(text, err = false, action = null) {
   toastTimer = setTimeout(() => (t.className = 'toast'), action ? 6000 : 2600);
 }
 
+// Всё, что относится к вводу в открытом матче: в другой матч это не переезжает.
+function resetInput() {
+  cancelClicks();
+  Object.assign(ui, { insertAt: null, edit: null, editPoints: false, sel: null, group: null, sub: null, pending: {}, playlist: null, draft: null, setH: null, moved: {}, movedKey: '', rallyKeySeen: null, focusRally: null, pickedRally: false, blockHover: null, mouse: null, hoverPid: null, cand: null, anchor: null });
+}
 function setMatch(match) {
   ui.match = match;
   recompute();
@@ -155,7 +160,8 @@ function queue(fn) {
   });
 }
 function postEvent(ev) {
-  ui.focusRally = null; ui.pickedRally = false;
+  // Ввод продолжается — выбранное в истории (розыгрыш, событие) больше не на площадке.
+  ui.focusRally = null; ui.pickedRally = false; ui.edit = null; ui.editPoints = false;
   const at = ui.insertAt, id = ui.match.id, before = rallyKey();
   if (at === null) ui.match.events.push(ev); else { ui.match.events.splice(at, 0, ev); ui.insertAt = at + 1; }
   recompute();
@@ -203,6 +209,7 @@ function pauseForInput() {
 // ровно на тот шаг, где это событие вводили (удалили пас — снова тянем дугу паса от той же точки).
 function undo() {
   closeMenu();
+  if (cancelClicks()) return;
   const d = ui.draft;
   if (d?.await) { ui.draft = d.await.prev; return render(); }
   if (d?.touch) { ui.draft = null; return render(); }
@@ -210,6 +217,7 @@ function undo() {
   const k = ui.insertAt !== null ? ui.insertAt - 1 : ui.match.events.length - 1;
   if (k < 0) return;
   const ev = ui.match.events[k];
+  const text = ui.full.log.find(l => l.i === k)?.text ?? 'последнее событие';
   ui.match.events.splice(k, 1);
   if (ui.insertAt !== null) ui.insertAt = k;
   recompute();
@@ -223,6 +231,19 @@ function undo() {
   render();
   const id = ui.match.id;
   queue(() => api('DELETE', `/api/matches/${id}/events/${k}`));
+  const left = ui.match.events.length, ins = ui.insertAt;
+  toast(`Отменено: ${text}`, false, {
+    label: 'Вернуть',
+    fn: () => {
+      // Пока кнопка висела, могли ввести новое — тогда возвращать некуда.
+      if (ui.match?.id !== id || ui.match.events.length !== left || ui.insertAt !== ins) return;
+      ui.match.events.splice(k, 0, ev);
+      if (ui.insertAt !== null) ui.insertAt++;
+      ui.draft = null;
+      recompute(); render();
+      queue(() => api('POST', `/api/matches/${id}/events?at=${k}`, ev));
+    },
+  });
 }
 
 // ---------- 3D-площадка: розыгрыш по касаниям ----------
@@ -303,7 +324,7 @@ function presets() {
 }
 const presetById = id => presets().find(p => p.id === id);
 // Роль игрока с учётом матча: в этом матче ЦБ может играть доигровщика (match.roles), иначе — роль в команде.
-const roleIn = id => ui.match?.roles?.[id] ?? roleOf(person(id)?.id ? person(id) : ui.roster.find(p => p.id === id));
+const roleIn = id => ui.match?.roles?.[id] || roleOf(person(id)?.id ? person(id) : ui.roster.find(p => p.id === id));
 const curPreset = () => presetById(ui.match?.preset) ?? presetById(ui.settings.activePreset) ?? presets()[0];
 const FORM = () => curPreset().formations ?? {};
 
@@ -318,7 +339,7 @@ function formation(c) {
   const rot = st.rally.rot, F = FORM();
   // Атака: настроенная в редакторе для этой расстановки — по ней; иначе — по ролям игроков.
   const byRole = kind === 'att' && !F.touched?.att?.[rot]
-    ? attackByRole(st.set.lineup.map(id => ({ id, zone: zoneOfId(id), role: roleOf(person(id)), front: isFrontZone(zoneOfId(id)) })), gs) : null;
+    ? attackByRole(st.set.lineup.map(id => ({ id, zone: zoneOfId(id), role: roleIn(id), front: isFrontZone(zoneOfId(id)) })), gs) : null;
   for (const id of st.set.lineup) {
     const z = zoneOfId(id);
     // Атака: из расстановок команды; пасующий (если пасует не тот, кто в зоне связующего, — например, в 4-2) — к сетке.
@@ -453,6 +474,7 @@ function onCourtPick(p, e, hit) {
   }
   const c = ctx();
   if (!c) return;
+  ui.focusRally = null; ui.pickedRally = false; ui.edit = null;
   pauseForInput();
   const right = e.button === 2;
   // Мяч у соперника: клик по сетке ставит (переставляет) наш блок — раньше, чем клик по игроку у сетки.
@@ -572,6 +594,14 @@ function secondOverMenu(p, c) {
   ], `Второе касание: ${esc(name(c.p))}`);
 }
 function clearLanding() { if (landing) { clearTimeout(landing.timer); landing = null; } }
+// Клик по полу ждёт ~0,3 с второго клика: отмена в это время отменяет именно его, а не прошлое событие.
+function cancelClicks() {
+  const was = !!(landing || pendingClick);
+  clearLanding();
+  if (pendingClick) { clearTimeout(pendingClick.timer); pendingClick = null; }
+  if (was) paintCourt();
+  return was;
+}
 // Общий разбор одиночного / двойного клика по полу: одиночный ждёт ~0,3 с, не будет ли второго рядом.
 let pendingClick = null;
 function singleOrDouble(p, single, double) {
@@ -699,6 +729,21 @@ function spotOfTarget(set) {
   const s = z ? ZONE_SPOT[z] : k >= 0 ? ZONE_SPOT[ui.st.rally.zones[k]] : null;
   return s && { x: s.x, y: Math.max(s.y, 6.6) };
 }
+// Мяч перешёл на их сторону: прошлые линии убираем, игроки заново встают в расстановку.
+const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'set.over', 'blk.touch', 'team.over']);
+// Новый розыгрыш или переход мяча: сбрасываем следы прошлого шага — до того, как что-либо нарисовано.
+// Откат (undo) ставит черновик шага заранее, поэтому незаконченные пас и касание не трогаем.
+function settleRally() {
+  if (!ui.st?.set) return;
+  const rk = rallyKey(), key = `${rk}:${rallyPlays().filter(p => CROSS.has(`${p.skill}.${p.res}`)).length}`;
+  if (key !== ui.movedKey) { ui.moved = {}; ui.movedKey = key; if (ui.draft && !ui.draft.touch && !ui.draft.set && !ui.draft.att && !ui.draft.origin && !ui.draft.await) ui.draft = null; }
+  if (ui.rallyKeySeen !== rk) {
+    ui.rallyKeySeen = rk;
+    if (!ui.draft?.set && !ui.draft?.touch) ui.draft = null;
+    // Мышь с прошлого клика не рисует линию и блок в новом розыгрыше, пока её не сдвинут.
+    ui.mouse = null; ui.blockHover = null; ui.hoverPid = null; ui.cand = null;
+  }
+}
 // Траектории только текущего розыгрыша (или розыгрыша выбранного события) — старые дуги не мешают.
 function focusPlays() {
   const plays = ui.full?.plays ?? [];
@@ -709,7 +754,6 @@ function focusPlays() {
   if (ui.focusRally) return rallyByKey(ui.focusRally)?.plays ?? [];
   // Во время ввода — только текущая фаза: когда мяч перешёл к сопернику, прошлые линии убираем.
   const rp = rallyPlays();
-  const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'set.over', 'blk.touch', 'team.over']);
   let k = -1;
   rp.forEach((p, i) => { if (CROSS.has(`${p.skill}.${p.res}`)) k = i; });
   return k >= 0 && baseStage(ctx()) === 'their' ? [] : rp.slice(k + 1);
@@ -822,6 +866,9 @@ function liveCandidate(m) {
 // Фишки: расстановка по ситуации + кто где у мяча. Пульсирует вероятный игрок (или тот, на кого наведена мышь),
 // сплошное кольцо — уже выбранный исполнитель текущего шага.
 function paintPlayers() {
+  if (replayKey) return; // идёт повтор по видео — игроков ведёт replayTick
+  const rv = ui.editPoints ? null : reviewRally();
+  if (rv) { court.setPlayers(replayPlayers(rv, Infinity)); return; }
   if (!live()) { court.setPlayers([]); return; }
   const st = ui.st, c = ctx();
   lastForm = formation(c);
@@ -838,18 +885,13 @@ function paintPlayers() {
   const hitFrom = c?.stage === 'their' ? c.origin ?? (c.block ?? ui.blockHover ? { x: (c.block ?? ui.blockHover).x, y: NET + 0.9 } : null) : null;
   court.setPlayers(st.set.lineup.map(id => {
     const p = person(id);
-    return { id, ...(id === setterNow ? { yaw: Math.PI / 2 } : hitFrom ? { face: hitFrom } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleOf(p) === 'l', spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
+    return { id, ...(id === setterNow ? { yaw: Math.PI / 2 } : hitFrom ? { face: hitFrom } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleIn(id) === 'l', spot: posOf(id), setter: id === gs, selected: ui.sel === id || id === actorId, server: st.rally.phase === 'serve' && st.rally.server === id, hl: id === pulse, pinned: !!ui.moved[id] };
   }));
 }
 
 function paintCourt() {
+  settleRally();
   const c = ctx();
-  // Новый розыгрыш или мяч ушёл к сопернику — игроки возвращаются в расстановку.
-  // Сколько раз мяч перешёл на их сторону в этом розыгрыше: при каждом переходе игроки заново встают в расстановку.
-  const CROSS = new Set(['serve.in', 'serve.good', 'att.play', 'rec.over', 'dig.over', 'set.over', 'blk.touch', 'team.over']);
-  const key = `${rallyKey()}:${rallyPlays().filter(p => CROSS.has(`${p.skill}.${p.res}`)).length}`;
-  if (key !== ui.movedKey) { ui.moved = {}; ui.movedKey = key; if (ui.draft && !ui.draft.touch && !ui.draft.set && !ui.draft.att && !ui.draft.origin && !ui.draft.await) ui.draft = null; }
-  if (ui.rallyKeySeen !== rallyKey()) { ui.rallyKeySeen = rallyKey(); if (!ui.draft?.set && !ui.draft?.touch) ui.draft = null; }
   paintPlayers();
   const edit = ui.editPoints && ui.edit !== null ? ui.match.events[ui.edit] : null;
   const a = c?.stage === 'await' ? c : null;
@@ -871,9 +913,9 @@ function paintBar() {
   if (!c) { el.innerHTML = ''; return; }
   const st = baseStage(c);
   const btn = (a, label, cls = '', extra = '', kbd = '') => `<button class="cb ${cls}" data-a="${a}" ${extra}>${label}${kbd ? `<span class="kbd">${kbd}</span>` : ''}</button>`;
-  const parts = [btn('undo', `${icon('i-undo')}Назад`, 'strong', '', '⌫')];
+  const parts = [btn('undo', `${icon('i-undo')}Шаг назад`, 'strong', 'title="Отменить последний шаг ввода. Выйти из матча — «Главная» слева вверху"', '⌫')];
   if (ui.draft) parts.push(btn('cancelStep', 'Отмена', '', 'title="Отменить незаконченный шаг"', 'Esc'));
-  if (c.stage === 'await') parts.push(btn('confirmSuggest', `Это #${esc(person(ui.hoverPid ?? c.suggest).num ?? '')}`, 'primary', `title="${esc(name(ui.hoverPid ?? c.suggest))}"`, '⏎'));
+  if (c.stage === 'await') parts.push(btn('confirmSuggest', `Это ${esc(person(ui.hoverPid ?? c.suggest).num ? '#' + person(ui.hoverPid ?? c.suggest).num : person(ui.hoverPid ?? c.suggest).name ?? '')}`, 'primary', `title="${esc(name(ui.hoverPid ?? c.suggest))}"`, '⏎'));
   if (st === 'set') {
     const q = c.stage === 'await' ? c.set.q : c.q, t = tempoOfH(curH());
     parts.push('<span class="sep"></span>', ...Object.entries({ q: '1т', f: '2т', h: '3т' }).map(([k, v]) => btn('tempo', v, t === k ? 'on' : '', `data-v="${k}" title="${TEMPO_NAME[k]} · колесо мыши"`)),
@@ -996,9 +1038,11 @@ function paintDock() {
     <h4 style="margin-top:14px">Соперник и розыгрыш</h4>
     <div class="team-acts">${teamActs}</div>
     <div class="tools-row">
-      <button class="btn sm" data-a="undo">${icon('i-undo')}Назад <span class="kbd">⌫</span></button>
+      <button class="btn sm" data-a="undo">${icon('i-undo')}Шаг назад</button>
       <button class="btn sm ghost" data-a="pt" data-side="us">+1 нам</button>
       <button class="btn sm ghost" data-a="pt" data-side="them">+1 им</button>
+      <button class="btn sm ghost" data-a="timeout" data-side="us" title="Тайм-аут наш (метка на видео и в анализе)">⏸ Т-аут</button>
+      <button class="btn sm ghost" data-a="timeout" data-side="them" title="Тайм-аут соперника">⏸ их</button>
     </div>
   </div>`;
   dock.innerHTML = left + center + right;
@@ -1234,6 +1278,7 @@ function paintHud() {
   const last = ui.full?.log.at(-1);
   const has = !!video.src;
   $('videoEmpty').style.display = has ? 'none' : '';
+  $('viewport').classList.toggle('novideo', !has);
   $('videoHud').innerHTML = has && ui.st?.set ? `<span>Р${ui.st.rally.rot}</span>${last ? `<span>${esc(last.text)}</span>` : ''}` : '';
   const hint = [];
   const c = ctx();
@@ -1266,6 +1311,7 @@ const STEP_HINT = {
 };
 
 function render() {
+  settleRally();
   paintTop();
   paintDock();
   paintSide();
@@ -1280,6 +1326,7 @@ function modal(html) {
   const box = $('modal').querySelector('.modal');
   if (html && box) { box.className = 'modal'; box.innerHTML = html; }
   else $('modal').innerHTML = html ? `<div class="modal-bg" data-a="modalBg"><div class="modal">${html}</div></div>` : '';
+  if (!html && ui.fromHome) location.href = '/'; // окно открыли с главной — закрыли, вернулись туда же
 }
 const modalOpen = () => !!$('modal').innerHTML;
 
@@ -1338,72 +1385,6 @@ async function openNewMatch() {
     <div class="foot"><button class="btn ghost" data-a="modalClose">Отмена</button></div>`);
   setTimeout(() => $('newOpp')?.focus(), 30);
 }
-
-// ---------- Стартовый экран (как в Figma / Adobe): продолжить, новый матч, недавние, все матчи ----------
-// Открывается при запуске (можно выключить в настройках), по клику на логотип и по Ctrl+O.
-// Ссылка прямо на матч (#m=…) открывает матч сразу, без стартового экрана.
-const HOME_VIEWS = [['recent', 'Главная', 'i-cube'], ['all', 'Все матчи', 'i-list'], ['team', 'Команда', 'i-users']];
-function greet() { const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : 'Добрый вечер'; }
-const matchState = m => (m.over ? 'окончен' : m.events ? 'идёт' : 'не начат');
-function matchCard(m) {
-  const tour = m.tournament ? ui.settings.tournaments?.find(t => t.id === m.tournament)?.name : '';
-  const st = matchState(m);
-  return `<button class="hcard" data-a="homeOpen" data-id="${m.id}">
-    <span class="hc-top">${ourEmblem('lg')}<span class="hc-score">${m.setsWon?.us ?? 0}<i>:</i>${m.setsWon?.them ?? 0}</span>${oppEmblem(m, 'lg')}</span>
-    <span class="hc-name"><b>${esc(ui.settings.teamName)} — ${esc(m.opponent)}</b><small>${new Date(m.created).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })}${tour ? ' · ' + esc(tour) : ''}</small></span>
-    <span class="hc-meta"><span class="pill ${st === 'идёт' ? 'live' : st === 'окончен' ? 'done' : ''}">${st}</span><span>событий ${m.events}</span>${m.videos?.length ? `<span>${icon('i-film')} ${m.videos.length}</span>` : ''}</span>
-  </button>`;
-}
-function homeMain(view) {
-  const ms = [...(ui.matches ?? [])].sort((a, b) => b.created.localeCompare(a.created));
-  const q = (ui.homeQ || '').trim().toLowerCase();
-  const found = q ? ms.filter(m => (m.opponent || '').toLowerCase().includes(q) || (ui.settings.tournaments?.find(t => t.id === m.tournament)?.name || '').toLowerCase().includes(q)) : ms;
-  const last = ms.find(m => m.id === store.get('lastMatch', null)) ?? ms[0];
-  if (view === 'team') {
-    const act = ui.roster.filter(p => p.active !== false);
-    return `<div class="hhead"><h1>Команда</h1></div>
-      <div class="hteam">${ourEmblem('xl')}<span><b>${esc(ui.settings.teamName)}</b><small>в составе ${act.length} · в запасе ${ui.roster.length - act.length} · соперников ${ui.settings.opponents.length}</small></span></div>
-      <div class="hroster">${act.sort((a, b) => (+a.num || 99) - (+b.num || 99)).map(p => `<span class="hplayer"><b>${esc(p.num ?? '')}</b>${esc(p.name)}<small>${ROLES[roleOf(p)]?.name ?? ''}</small></span>`).join('') || '<p class="muted">Игроков пока нет.</p>'}</div>
-      <div class="hactions">
-        <button class="hact" data-a="homeSettings" data-tab="team">${icon('i-users')}<b>Состав, форма, расстановки</b><small>игроки, цвета формы, Р1–Р6, зоны доводки</small></button>
-        <button class="hact" data-a="homeSettings" data-tab="data">${icon('i-upload')}<b>Пакет команды</b><small>скачать или загрузить: состав, форма, расстановки, соперники</small></button>
-      </div>`;
-  }
-  if (view === 'all') {
-    // Все матчи — по турнирам (без турнира — отдельно), поиск по сопернику и турниру.
-    const groups = new Map();
-    for (const m of found) { const k = m.tournament ?? ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); }
-    return `<div class="hhead"><h1>Все матчи</h1><input class="hsearch" data-k="homeQ" placeholder="Поиск: соперник или турнир" value="${esc(ui.homeQ || '')}"><button class="btn primary" data-a="homeNew">${icon('i-plus')}Новый матч</button></div>
-      ${[...groups].map(([k, list]) => `<h3 class="hsec">${esc(k ? ui.settings.tournaments?.find(t => t.id === k)?.name ?? 'Турнир' : 'Без турнира')} <small>${list.length}</small></h3><div class="hgrid">${list.map(matchCard).join('')}</div>`).join('') || `<p class="muted">${q ? 'Ничего не нашлось.' : 'Матчей пока нет.'}</p>`}`;
-  }
-  return `<div class="hhead"><h1>${greet()}${ui.settings.teamName ? `, «${esc(ui.settings.teamName)}»` : ''}</h1><input class="hsearch" data-k="homeQ" placeholder="Поиск: соперник или турнир" value="${esc(ui.homeQ || '')}"></div>
-    <div class="hactions">
-      <button class="hact primary" data-a="homeNew">${icon('i-plus')}<b>Новый матч</b><small>выбрать соперника и формат</small></button>
-      ${last ? `<button class="hact" data-a="homeOpen" data-id="${last.id}">${icon('i-play')}<b>Продолжить</b><small>${esc(last.opponent)} · ${new Date(last.created).toLocaleDateString('ru')} · ${matchState(last)}</small></button>` : ''}
-      <button class="hact" data-a="homeVideo">${icon('i-film')}<b>Открыть видео</b><small>файл игры — в библиотеку программы</small></button>
-      <a class="hact" href="stats.html" target="_blank">${icon('i-chart')}<b>Аналитика</b><small>дашборд по всем матчам</small></a>
-    </div>
-    <h3 class="hsec">${q ? 'Найдено' : 'Недавние'} <small>${found.length}</small>${!q && ms.length > 8 ? '<button class="btn sm ghost" data-a="homeView" data-v="all">Все матчи</button>' : ''}</h3>
-    <div class="hgrid">${(q ? found : found.slice(0, 8)).map(matchCard).join('') || `<div class="hempty"><b>${q ? 'Ничего не нашлось' : 'Матчей пока нет'}</b><small>${q ? 'Попробуйте другое название.' : 'Создайте первый матч — и ведите статистику по видео или вживую.'}</small></div>`}</div>`;
-}
-function paintHome() {
-  const el = $('home');
-  if (!ui.home) { el.hidden = true; el.innerHTML = ''; return; }
-  const v = ui.home;
-  el.hidden = false;
-  el.innerHTML = `<aside class="hside">
-      <div class="hbrand"><img src="img/logo.svg" alt=""><span><b>Волей Метрика</b><small>Студия</small></span></div>
-      ${HOME_VIEWS.map(([k, l, ic]) => `<button class="${v === k ? 'on' : ''}" data-a="homeView" data-v="${k}">${icon(ic)}${l}</button>`).join('')}
-      <a href="stats.html" target="_blank">${icon('i-chart')}Аналитика</a>
-      <span class="grow"></span>
-      <a href="detailed.html">${icon('i-phone')}Пульт для телефона</a>
-      <button data-a="homeSettings">${icon('i-gear')}Настройки</button>
-      ${ui.match ? `<button class="hback" data-a="homeClose">${icon('i-x')}Вернуться к матчу</button>` : ''}
-    </aside>
-    <main class="hmain">${homeMain(v)}</main>`;
-}
-function openHome(view = 'recent') { closeMenu(); ui.home = view; paintHome(); }
-function closeHome() { ui.home = null; paintHome(); render(); }
 
 function openHelp() {
   const k = (keys, text) => `<span class="k">${keys.map(x => `<span class="kbd">${x}</span>`).join('')}</span><span>${text}</span>`;
@@ -1557,10 +1538,10 @@ function rosterPanel(f) {
     const sl = [0, 1, 2, 3, 4, 5].find(s => slotZone(s, f.rot, ms) === z);
     const cur = lu.start[sl];
     return `<label class="rz"><span>зона ${z}${sl === ms ? ' · связующий' : ''}</span>
-      <select data-k="fSlot" data-slot="${sl}">${roster.map(p => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>#${esc(p.num)} ${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</option>`).join('')}</select></label>`;
+      <select data-k="fSlot" data-slot="${sl}">${roster.map(p => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>${p.num ? '#' + esc(p.num) + ' ' : ''}${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</option>`).join('')}</select></label>`;
   };
   return `<div class="rpanel"><p class="muted" style="margin:0 0 8px"><span class="tip-inline">Кто где стоит в Р${f.rot}. Задайте один раз — в остальных переходах игроки встанут по кругу.</span>
-      Связующий (по нему считаются Р1–Р6): <select data-k="fMain">${lu.start.filter(Boolean).map(id => { const p = roster.find(x => x.id === id); return `<option value="${id}" ${id === lu.main ? 'selected' : ''}>#${esc(p?.num)} ${esc(p?.name)}</option>`; }).join('')}</select></p>
+      Связующий (по нему считаются Р1–Р6): <select data-k="fMain">${lu.start.filter(Boolean).map(id => { const p = roster.find(x => x.id === id); return `<option value="${id}" ${id === lu.main ? 'selected' : ''}>${p?.num ? '#' + esc(p.num) + ' ' : ''}${esc(p?.name)}</option>`; }).join('')}</select></p>
     <div class="rgrid">${[4, 3, 2, 5, 6, 1].map(cell).join('')}</div></div>`;
 }
 // Поля редактора смотрят в рабочую копию выбранного пресета.
@@ -1771,7 +1752,6 @@ const switchCtl = (k, on) => `<label class="switch"><input type="checkbox" data-
 function settingsBody(tab) {
   if (tab === 'general') return `<h3 class="mh">Общие</h3>
     ${optRow('Режим подсказок', 'Задержите курсор на кнопке — появится пояснение. То же — кнопка «?» в верхней панели.', switchCtl('optTips', tips.on))}
-    ${optRow('Стартовый экран при запуске', 'Последние матчи, новый матч, команда — вместо сразу открытого матча.', switchCtl('optStart', store.get('startScreen', true)))}
     ${optRow('Обучение', 'Короткий тур по окну студии.', '<button class="btn sm" data-a="tourStart">Пройти снова</button>')}
     ${optRow('Горячие клавиши', 'Все сочетания на одной странице. Клавиша ?', '<button class="btn sm" data-a="help">Открыть</button>')}`;
   if (tab === 'player') return `<h3 class="mh">Плеер</h3>
@@ -1888,7 +1868,7 @@ const TOUR = [
   ['#timeline', 'Таймлайн', 'Метки касаний: зелёные — очко нам, красные — им, жёлтые — тайм-ауты. Клик по метке — к этому моменту.'],
   ['.court-pane', '3D-площадка', 'Розыгрыш вводится кликами. Сначала точка, куда пришёл мяч, потом игрок (вероятный пульсирует). Двойной клик по полу — очко в эту точку. Мышь — вращать, колесо — зум.'],
   ['#courtHint', 'Что делать сейчас', 'Подсказка шага и счётчик касаний 1 · 2 · 3: приём → доводка (оценка по зонам) → пас (колесо — высота) → атака.'],
-  ['#courtBar', 'Кнопки под рукой', '«Назад» (⌫) — на шаг назад, «Отмена» (Esc), «Мяч упал» (X), тайм-ауты, +1 без статистики.'],
+  ['#courtBar', 'Кнопки под рукой', '«Шаг назад» (⌫) — отменить последний шаг, «Отмена» (Esc), «Мяч упал» (X), тайм-ауты, +1 без статистики.'],
   ['.court-tools', 'Виды и настройки', 'Камера: перспектива, сверху, из-за спины, сбоку. Сетка зон, история касаний, расстановки команды и зоны доводки ++ / + / −.'],
   ['#dock', 'Нижняя панель', 'Расстановка Р1–Р6 и замены, кнопки действий — запасной вариант ввода без площадки (клавиши A–H, Q–Y).'],
   ['#sideTabs', 'Панели справа', '«События» — розыгрыши (★ лучшие моменты, нарезка mp4) и правка; «Видео» — библиотека; «Стат.» — живая статистика; «Матч» — формат, турнир, пресет, команда и резервные копии.'],
@@ -2055,9 +2035,24 @@ function sideRallies() {
   return html || '<p class="muted">Розыгрышей пока нет.</p>';
 }
 
+// Какой розыгрыш смотрим из истории: выбранный в списке или тот, чьё событие выделено.
+function reviewRally() {
+  if (!ui.match) return null;
+  const pl = ui.edit !== null ? ui.full?.plays.find(p => p.i === ui.edit) : null;
+  return rallyByKey(pl ? `${pl.set}:${pl.rally}` : ui.focusRally) ?? null;
+}
 // Повтор по видео: розыгрыш, во время которого сейчас кадр, показывается на 3D синхронно.
 function rallyAtTime(t) {
-  return rallies().find(r => r.won != null && r.t0 != null && r.v === ui.activeVideo && t >= r.t0 - 2 && t <= r.t1 + 2.5);
+  const hit = r => r.won != null && r.t0 != null && r.v === ui.activeVideo && t >= r.t0 - 2 && t <= r.t1 + 2.5;
+  const picked = ui.pickedRally && ui.focusRally ? rallyByKey(ui.focusRally) : null;
+  if (picked && hit(picked)) return picked;
+  // Край ввода: от кадра последнего введённого розыгрыша и дальше площадка принадлежит вводу, а не повтору.
+  // Берём последний по порядку ввода, а не по времени: вводить могли и с перемотанного назад видео.
+  if (live()) {
+    const edge = rallies().findLast(r => r.v === ui.activeVideo && r.t1 != null)?.t1 ?? 0;
+    if (ui.insertAt !== null || t >= edge) return null;
+  }
+  return rallies().find(hit);
 }
 function stateAt(r) {
   // Состав и зоны на начало розыгрыша — переигрываем события до его первого касания.
@@ -2106,7 +2101,7 @@ function replayPlayers(r, t) {
   const st0 = stateAt(r);
   if (!st0.set) return [];
   const lineup = st0.set.lineup, zones = st0.rally.zones, rot = st0.rally.rot, F = FORM();
-  const done = r.plays.filter(p => p.vt != null && p.vt <= t);
+  const done = r.plays.filter(p => t === Infinity || (p.vt != null && p.vt <= t)); // Infinity — итог розыгрыша (просмотр без видео)
   const last = done.at(-1);
   const crossed = last && (['serve', 'att'].includes(last.skill) && last.res !== 'kill' || ['over'].includes(last.res));
   const kind = !last ? (r.weServe ? 'serve' : 'rec') : crossed || last.skill === 'serve' ? 'def' : 'att';
@@ -2125,26 +2120,33 @@ function replayPlayers(r, t) {
     const pt = pl.skill === 'set' ? pl.from : pl.to;
     if (pl.p && pt) moved[pl.p] = pt;
   }
-  const gsR = lineup.find(id => setters.has(id) && isFrontZone(zones[lineup.indexOf(id)])) ?? lineup.find(id => setters.has(id));
-  const attRole = attackByRole(lineup.map((id, k) => ({ id, zone: zones[k], role: roleOf(person(id)), front: isFrontZone(zones[k]) })), gsR);
+  const gsR = guessSetter({ system: ui.match.system, lineup, zones, setters, main: st0.set.main });
+  const attRole = attackByRole(lineup.map((id, k) => ({ id, zone: zones[k], role: roleIn(id), front: isFrontZone(zones[k]) })), gsR);
   return lineup.map((id, k) => {
     const z = zones[k], p = person(id);
     let spot = kind === 'att' ? (F.touched?.att?.[rot] ? spotFor(F, 'att', rot, z) : attRole[id]) : spotFor(F, kind, rot, z);
     if (kind === 'serve' && st0.rally.server === id && !last) spot = { x: 7.6, y: -0.9 };
-    return { id, ...(last?.skill === 'set' && last.p === id ? { yaw: Math.PI / 2 } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleOf(p) === 'l', spot: moved[id] ?? spot, setter: setters.has(id), selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
+    return { id, ...(last?.skill === 'set' && last.p === id ? { yaw: Math.PI / 2 } : {}), label: p.num || (p.name || '?').slice(0, 2), num: p.num, name: p.name, libero: roleIn(id) === 'l', spot: moved[id] ?? spot, setter: id === gsR, selected: last?.p === id, pinned: !!moved[id], act: last?.p === id && ACT_OF[last.skill] ? { type: ACT_OF[last.skill], key: `${last.skill}:${last.vt}` } : null };
   });
 }
 let replayKey = null;
+function endReplay() {
+  if (!replayKey) return;
+  replayKey = null;
+  if (!ui.pickedRally) ui.focusRally = null;
+  court.setBall(null);
+  render();
+}
 function replayTick() {
   requestAnimationFrame(replayTick);
   // В синхронизации повтор — только если розыгрыш выбрали в истории сами (иначе он мешал бы вводу следующего).
-  if (!ui.match || !video.src || ui.draft || (ui.sync && (ui.anchor != null || !ui.pickedRally))) { if (replayKey) { replayKey = null; court.setBall(null); paintCourt(); } return; }
+  if (!ui.match || !video.src || ui.draft || (ui.sync && (ui.anchor != null || !ui.pickedRally))) return endReplay();
   const t = video.currentTime;
   const r = rallyAtTime(t);
-  if (!r) { if (replayKey) { replayKey = null; court.setBall(null); paintCourt(); } return; }
+  if (!r) return endReplay();
   if (replayKey !== r.key) {
     replayKey = r.key;
-    if (ui.focusRally !== r.key) { ui.focusRally = r.key; if (ui.tab === 'events') paintSide(); }
+    if (ui.focusRally !== r.key) { ui.focusRally = r.key; ui.pickedRally = false; if (ui.tab === 'events') paintSide(); }
     court.setTrails(trailsFor(r.plays), { animate: false });
     court.setPreview([]); court.setHands([]);
   }
@@ -2391,7 +2393,7 @@ async function loadAll() {
 async function openMatch(id) {
   const match = await api('GET', `/api/matches/${id}`);
   if (!match || match.mode === 'quick') return;
-  ui.insertAt = null; ui.edit = null; ui.sel = null; ui.pending = {}; ui.playlist = null;
+  resetInput();
   setMatch(match);
   const vid = store.get('video.' + id) ?? match.videos?.[0];
   if (vid && ui.videos.some(v => v.id === vid)) openVideo(vid);
@@ -2400,14 +2402,14 @@ async function openMatch(id) {
 
 // Новый матч. Если открыто видео — сразу привязываем его: обычно матч создают, уже открыв запись игры.
 async function createMatch(opponentId) {
+  ui.fromHome = false;
   const fmtSel = $('fmt')?.value;
   if (fmtSel) ui.fmtSel = fmtSel;
   modal('');
-  ui.insertAt = null; ui.edit = null; ui.sel = null; ui.pending = {}; ui.playlist = null;
+  resetInput();
   const format = pickFormat(ui.fmtSel ?? formatKey(ui.settings.lastFormat));
   ui.fmtSel = null;
   setMatch(await api('POST', '/api/matches', { opponentId, format }));
-  if (ui.home) closeHome();
   ui.settings.lastFormat = format;
   ui.matches = await api('GET', '/api/matches');
   if (ui.activeVideo) { await linkVideo(ui.activeVideo); store.set('video.' + ui.match.id, ui.activeVideo); toast('Открытое видео привязано к новому матчу'); }
@@ -2419,8 +2421,8 @@ const H = {
   tab: d => { ui.tab = d.tab; if (d.tab === 'video' && !ui.clips) api('GET', '/api/clips').then(c => { ui.clips = c; if (ui.tab === 'video') paintSide(); }).catch(() => {}); render(); },
   help: openHelp,
   tips: () => toast(tips.toggle() ? 'Подсказки включены: задержите курсор на кнопке — появится пояснение' : 'Подсказки выключены'),
-  modalClose: () => { modal(''); ui.fEdit = null; ui.team = null; },
-  modalBg: (d, e) => { if (e.target.classList.contains('modal-bg')) modal(''); },
+  modalClose: () => { ui.fEdit = null; ui.team = null; modal(''); },
+  modalBg: (d, e) => { if (e.target.classList.contains('modal-bg')) H.modalClose(); },
   pickFile: () => $('fileInput').click(),
   view: d => { court.setView(d.v); document.querySelectorAll('[data-a=view]').forEach(b => b.classList.toggle('on', b.dataset.v === d.v)); },
   labelMode: () => {
@@ -2473,7 +2475,7 @@ const H = {
   settings: d => openSettings(d.tab),
   setTab: d => openSettings(d.v),
   setOpt: d => applyOpt(d.k, d.v),
-  settingsClose: () => { modal(''); ui.dataView = null; },
+  settingsClose: () => { ui.dataView = null; modal(''); },
   teamImportCancel: () => { ui.teamImport = null; paintSettings(); },
   teamImport: () => call(async () => {
     const t = ui.teamImport;
@@ -2676,13 +2678,6 @@ const H = {
     sendRaw({ t: 'set', lineup: d.order, weServe: d.weServe, ...(setter && { setter }), ...(d.target && { target: d.target }) });
   },
   newMatch: openNewMatch,
-  home: (d, e) => { e?.preventDefault(); openHome(); },
-  homeView: d => { ui.home = d.v; paintHome(); },
-  homeClose: () => closeHome(),
-  homeOpen: d => call(async () => { await openMatch(d.id); ui.tab = 'events'; closeHome(); }),
-  homeNew: () => openNewMatch(),
-  homeVideo: () => { closeHome(); $('fileInput').click(); },
-  homeSettings: d => openSettings(d.tab),
   createMatch: d => call(() => createMatch(d.id)),
   createNewOpp: () => {
     const nm = $('newOpp').value.trim();
@@ -2766,7 +2761,6 @@ document.addEventListener('change', e => {
       toast(`Матч загружен: ${r.opponent} · событий ${r.events}`);
     });
   }
-  if (k === 'optStart') store.set('startScreen', v);
   if (k === 'optAutoPause') { $('autoPause').checked = v; store.set('autoPause', v); }
   if (k === 'optZones') { store.set('zonesOn', v); court.toggleZones(v); document.querySelector('[data-a=zones]')?.classList.toggle('on', v); }
   if (k === 'rFilter') { ui.rFilter = v; paintSide(); }
@@ -2824,12 +2818,6 @@ document.addEventListener('change', e => {
   if (k === 'etempo') updateEvent(ui.edit, { tempo: v });
 });
 document.addEventListener('input', e => {
-  if (e.target.dataset.k === 'homeQ') {
-    ui.homeQ = e.target.value;
-    const pos = e.target.selectionStart;
-    paintHome();
-    const inp = document.querySelector('#home .hsearch'); if (inp) { inp.focus(); inp.setSelectionRange(pos, pos); }
-  }
   if (ui.team && e.target.dataset.k === 'teamName') ui.team.teamName = e.target.value;
   if (ui.team && e.target.dataset.k === 'kitColor') { ui.team.kit[e.target.dataset.key] = e.target.value; document.querySelector('.kitprev').innerHTML = kitPreview(ui.team.kit); }
   if (ui.team && e.target.dataset.k === 'oppName') ui.team.opponents[+e.target.dataset.i].name = e.target.value;
@@ -2858,17 +2846,11 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (modalOpen()) {
-    if (e.key === 'Escape') { modal(''); ui.fEdit = null; }
+    if (e.key === 'Escape') H.modalClose();
     if (e.key === 'Enter' && ui.lineupDraft?.order.length === 6 && $('modal').querySelector('[data-a=lstart]')) H.lstart();
     return;
   }
-  // Стартовый экран: клавиши студии не работают (матч под ним), Esc — вернуться к матчу.
-  if (ui.home) {
-    if ((e.ctrlKey || e.metaKey) && e.code === 'Comma') { e.preventDefault(); openSettings(); }
-    if (e.key === 'Escape' && ui.match) closeHome();
-    return;
-  }
-  if (e.ctrlKey || e.metaKey) { if (e.code === 'KeyZ') { e.preventDefault(); undo(); } if (e.code === 'Comma') { e.preventDefault(); openSettings(); } if (e.code === 'KeyO') { e.preventDefault(); openHome(); } return; }
+  if (e.ctrlKey || e.metaKey) { if (e.code === 'KeyZ') { e.preventDefault(); undo(); } if (e.code === 'Comma') { e.preventDefault(); openSettings(); } if (e.code === 'KeyO') { e.preventDefault(); location.href = '/'; } return; }
   const c = e.code;
   if (c === 'BracketLeft' || c === 'BracketRight') { stepSpeed(c === 'BracketLeft' ? -1 : 1); return; }
   if (c === 'Escape' && $('speedPop').classList.contains('on')) { closeSpeed(); return; }
@@ -2893,8 +2875,9 @@ document.addEventListener('keydown', e => {
   // Esc: сначала меню, потом незаконченный шаг, потом выбор/правка.
   if (c === 'Escape') {
     if (ui.menu) { closeMenu(); return; }
+    if (cancelClicks()) return;
     if (ui.draft) { H.cancelStep(); return; }
-    ui.sel = null; ui.group = null; ui.edit = null; ui.editPoints = false; ui.sub = null; render(); return;
+    ui.sel = null; ui.group = null; ui.edit = null; ui.editPoints = false; ui.sub = null; ui.focusRally = null; ui.pickedRally = false; render(); return;
   }
   if (c === 'Backspace' || c === 'Delete') { e.preventDefault(); undo(); return; }
   if (c === 'KeyV') { const order = ['split', 'video', 'court']; setLayout(order[(order.indexOf($('viewport').dataset.layout) + 1) % 3]); return; }
@@ -2978,9 +2961,8 @@ call(async () => {
   const id = location.hash.match(/m=([a-z0-9]+)/)?.[1] ?? store.get('lastMatch', null) ?? ui.matches[0]?.id;
   pollVideos();
   if (!store.get('tourDone', false)) setTimeout(() => startTour(0), 900);
-  // Со стартового экрана программы: #new — новый матч, #settings[=раздел] — настройки, #home — стартовый экран студии.
-  const h = location.hash, direct = /m=([a-z0-9]+)/.test(h), cmd = /^#(new|settings|home)/.test(h);
-  if (h === '#home' || (store.get('startScreen', true) && !direct && !cmd)) openHome();
+  // С главной: #new — новый матч, #settings[=раздел] — настройки. Без адреса — последний матч.
+  const h = location.hash, cmd = /^#(new|settings)/.test(h);
   if (id && ui.matches.some(m => m.id === id)) {
     await openMatch(id);
     // Ссылка на конкретный розыгрыш (из отчёта игрока): #m=…&r=партия:розыгрыш.
@@ -2988,20 +2970,20 @@ call(async () => {
     if (rk) setTimeout(() => { ui.tab = 'events'; ui.evView = 'rallies'; pickRally(rk); }, 300);
   }
   else ui.tab = 'match';
+  ui.fromHome = cmd;
   if (h === '#new') openNewMatch();
   const sm = /^#settings(?:=(\w+))?/.exec(h);
   if (sm) openSettings(sm[1] || 'general');
   if (cmd) history.replaceState(null, '', location.pathname + (ui.match ? '#m=' + ui.match.id : ''));
 });
 // Дашборд и телефон могут менять данные — подтягиваем список матчей, когда окно снова в фокусе.
-addEventListener('focus', () => { if (!ui.busy) loadAll().then(() => ui.match && api('GET', `/api/matches/${ui.match.id}`)).then(m => { if (m) setMatch(m); render(); }).catch(() => {}); });
+addEventListener('focus', () => { if (!ui.busy && !inFlight) loadAll().then(() => ui.match && api('GET', `/api/matches/${ui.match.id}`)).then(m => { if (m) setMatch(m); render(); }).catch(() => {}); });
 
 // Ссылка на другой матч или розыгрыш в уже открытой студии (#m=…&r=…) — открываем без перезагрузки.
 addEventListener('hashchange', () => {
   const sm = /^#settings(?:=(\w+))?/.exec(location.hash);
   if (sm) { openSettings(sm[1] || 'general'); return; }
   if (location.hash === '#new') { openNewMatch(); return; }
-  if (location.hash === '#home') { openHome(); return; }
   const id = location.hash.match(/m=([a-z0-9]+)/)?.[1];
   const rk = location.hash.match(/r=(\d+:\d+)/)?.[1];
   if (!id) return;

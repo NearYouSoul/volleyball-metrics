@@ -93,8 +93,12 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 
 /* ---------- Верхняя панель ---------- */
 .brand { display: flex; align-items: center; gap: 10px; font-size: 14px; padding-right: 6px; }
+.navback { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 30px; padding: 0 10px 0 6px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--text); background: var(--raise); box-shadow: var(--key); text-decoration: none; }
+.navback svg { width: 16px; height: 16px; }
+.navback:hover { box-shadow: var(--key-hi); }
 .brandmark { width: 28px; height: 28px; border-radius: 7px; flex: none; }
-.bname { display: flex; flex-direction: column; line-height: 1.1; }
+.bname { display: flex; flex-direction: column; line-height: 1.1; white-space: nowrap; }
+@media (max-width: 1600px) { .topbar .bname { display: none; } .topbar .brand { padding-right: 0; } }
 .bname b { font-size: 13.5px; font-weight: 600; letter-spacing: -.005em; }
 .bname small { font-size: 11px; color: var(--smoke); }
 .logo { width: 12px; height: 12px; border-radius: 3px; transform: rotate(45deg); background: var(--coral); box-shadow: 0 0 16px rgb(255 99 99 / .55); }
@@ -106,9 +110,9 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 .scoreboard .team.them { flex-direction: row-reverse; }
 .scoreboard .pts { font-size: 26px; font-weight: 500; color: var(--text); min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; line-height: 1; }
 .scoreboard .serving::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 10px var(--amber); }
-.scoreboard .mid { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: var(--smoke); line-height: 1.25; }
+.scoreboard .mid { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: var(--smoke); line-height: 1.25; white-space: nowrap; }
 .scoreboard .mid b { font: 500 13px var(--mono); color: var(--ash); }
-.phase-pill { margin-right: auto; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 10px; border-radius: 99px; font-size: 13px; font-weight: 500; background: var(--well); color: var(--ash); }
+.phase-pill { white-space: nowrap; margin-right: auto; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 10px; border-radius: 99px; font-size: 13px; font-weight: 500; background: var(--well); color: var(--ash); }
 .phase-pill i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .phase-pill.ph-serve, .phase-pill.ph-ours { background: var(--us-bg); color: var(--mint); }
 .phase-pill.ph-rec, .phase-pill.ph-their { background: var(--mid-bg); color: var(--amber); }
@@ -120,6 +124,7 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 
 /* ---------- Вьюпорт: видео + площадка ---------- */
 .viewport { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--split, 58%) 6px minmax(0, 1fr); background: #000; }
+.viewport.novideo[data-layout=split] { grid-template-columns: min(var(--split, 58%), 28%) 6px minmax(0, 1fr); } /* нет видео — площадке главное место */
 .viewport[data-layout=video] { grid-template-columns: 1fr 0 0; }
 .viewport[data-layout=video] .court-pane, .viewport[data-layout=video] .splitter { display: none; }
 .viewport[data-layout=court] { grid-template-columns: minmax(0, 1fr); } /* видимой остаётся одна панель — ей вся ширина */
@@ -663,7 +668,6 @@ body.tips-on button[data-tip], body.tips-on a[data-tip], body.tips-on input[data
 .hside > button:hover, .hside > a:hover { color: var(--text); background: var(--well); }
 .hside > button.on { color: var(--text); background: var(--raise); box-shadow: var(--key); }
 .hside .grow { flex: 1; }
-.hside .hback { margin-top: 8px; color: var(--text); background: var(--raise); box-shadow: var(--key); }
 .hmain { overflow: auto; padding: 32px 40px 48px; }
 .hhead { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
 .hhead h1 { margin: 0; font-size: 26px; font-weight: 500; letter-spacing: -.01em; flex: 1; }

@@ -3,7 +3,7 @@
 
 body.dash2 { overflow: auto; height: auto; min-height: 100%; }
 .dtop { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 18px; height: 56px; padding: 0 20px; background: rgb(17 18 21 / .88); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-.dnav { display: flex; gap: 2px; margin-right: auto; overflow-x: auto; }
+.dnav { display: flex; gap: 2px; margin-right: auto; overflow-x: auto; min-width: 0; }
 .dnav a { padding: 7px 12px; border-radius: 8px; color: var(--ash); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .dnav a:hover { color: var(--text); background: var(--well); }
 .dfilters { position: sticky; top: 56px; z-index: 19; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 20px; background: rgb(10 11 13 / .9); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -19,7 +19,7 @@ body.dash2 { overflow: auto; height: auto; min-height: 100%; }
 .g2 { grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); }
 .g3 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .panel { background: var(--panel); border-radius: 14px; box-shadow: var(--key); padding: 16px 18px; min-width: 0; }
-.panel h3 { margin: 0 0 12px; font-size: 13px; font-weight: 500; color: var(--ash); display: flex; align-items: center; gap: 10px; }
+.panel h3 { margin: 0 0 12px; font-size: 13px; font-weight: 500; color: var(--ash); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .panel h3 .grow { flex: 1; }
 .panel h3 small { color: var(--smoke); font-weight: 400; }
 

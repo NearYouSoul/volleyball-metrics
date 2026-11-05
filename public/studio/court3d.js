@@ -180,7 +180,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.49;
   controls.minDistance = 6;
-  controls.maxDistance = 50;
+  controls.maxDistance = 80;
 
   // Свет: мягкий общий + «прожектор зала» с тенями + слабая контровая подсветка с другой стороны.
   scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1a1a1a, 1.25));
@@ -319,11 +319,11 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
   // Подписи: 'num' — номер, 'name' — имя, 'full' — как записан в составе (номер и имя), 'none' — без подписи.
   let labelMode = 'num';
   const labelText = info => {
-    const num = info.num != null && info.num !== '' ? String(info.num) : '', name = (info.name || '').trim();
+    const num = info.num ? String(info.num) : '', name = (info.name || '').trim(); // 0 — номер не задан
     if (labelMode === 'none') return '';
     if (labelMode === 'name') return name.split(/\s+/)[0] || num || String(info.label ?? '');
     if (labelMode === 'full') return [num, name].filter(Boolean).join(' ') || String(info.label ?? '');
-    return num || String(info.label ?? '');
+    return num || name.split(/\s+/)[0] || String(info.label ?? '');
   };
   function paintLabel(g, info) {
     const u = g.userData, text = labelText(info);
@@ -342,7 +342,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     const hit = new THREE.Mesh(G.hit, MAT.hit); // невидимый «корпус» для клика
     hit.position.y = 1.0; hit.userData.pid = p.id;
     g.add(hit);
-    const numTex = p.num != null && p.num !== '' ? numberTexture(p.num, kit.number) : null;
+    const numTex = p.num ? numberTexture(p.num, kit.number) : null;
     const rig = buildFigure(g, { detail, M: FM, numTex, id: p.id });
     // Пятно-тень под ногами: на полу всегда, в прыжке — бледнее и меньше.
     const bm = MAT.blob.clone(); bm.userData = {};
@@ -413,7 +413,8 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
       a.path.blend ??= { x: pos.x - a.path.o.x - a.path.d.x * f, z: pos.z - a.path.o.z - a.path.d.z * f, t: now };
       const k = Math.max(0, 1 - (now - a.path.blend.t) / 300);
       const nx = a.path.o.x + a.path.d.x * f + a.path.blend.x * k, nz = a.path.o.z + a.path.d.z * f + a.path.blend.z * k;
-      rec.vel.set((nx - pos.x) / Math.max(dt, 1e-3), 0, (nz - pos.z) / Math.max(dt, 1e-3));
+      // На редких кадрах шаг большой, а dt ограничен: без предела скорость «выстреливает» и игрока уносит за площадку.
+      rec.vel.set((nx - pos.x) / Math.max(dt, 1e-3), 0, (nz - pos.z) / Math.max(dt, 1e-3)).clampLength(0, VMAX);
       pos.x = nx; pos.z = nz;
       rec.driven = true;
       return;
@@ -461,6 +462,7 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     if (!rec.driven) gait(P, u.phase, vf, vs, active ? (a.type === 'blk' ? 0 : 0.8) : 1, active ? 0 : 1);
     const jump = active ? jumpAt(a.type, s, a.H ?? JUMP[a.type] ?? 0) : 0;
     applyPose(rig, P, jump);
+    u.sprite.position.y = 2.32 + jump; // подпись прыгает вместе с игроком и не закрывает его
     // Движение «на месте» (повтор по видео): разбег/подача рисуются со смещением назад и приходят в точку.
     let ox = 0, oz = 0;
     if (active && a.local) { const f = P.fwd - a.local; ox = -Math.sin(ry) * f; oz = -Math.cos(ry) * f; }
@@ -931,10 +933,46 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     behind: { pos: [0, 4.2, 14.5], target: [0, 1.6, -3] },
     their: { pos: [0, 12.5, -19], target: [0, 0, -1] },
   };
-  let camAnim = null;
+  let camAnim = null, viewName = 'persp', userCam = false;
+  controls.addEventListener('start', () => { userCam = true; camAnim = null; }); // повернули или приблизили сами — кадр больше не подгоняем
+  // Кадр: вся площадка и подающий за лицевой — между инструментами сверху и кнопками снизу, при любой форме окна.
+  const FRAME = [[-4.8, 0, -9.3], [4.8, 0, -9.3], [-4.8, 0, 10.5], [4.8, 0, 10.5], [3.1, 2.5, 10.1], [-4.6, 3.3, 0], [4.6, 3.3, 0]].map(a => new THREE.Vector3(...a));
+  const INSET = { top: 46, bottom: 58 };
+  const fitCam = new THREE.PerspectiveCamera();
+  function frameBox(target, dir, d) {
+    fitCam.position.copy(target).addScaledVector(dir, d);
+    fitCam.lookAt(target);
+    fitCam.updateMatrixWorld();
+    const b = { x0: 9, x1: -9, y0: 9, y1: -9 }, v = new THREE.Vector3();
+    for (const p of FRAME) {
+      v.copy(p).project(fitCam);
+      b.x0 = Math.min(b.x0, v.x); b.x1 = Math.max(b.x1, v.x); b.y0 = Math.min(b.y0, v.y); b.y1 = Math.max(b.y1, v.y);
+    }
+    return b;
+  }
+  // Подбираем расстояние по направлению ракурса, потом сдвигаем картинку в свободную часть окна (без смены угла).
+  function fitView(v) {
+    const w = el.clientWidth, h = el.clientHeight;
+    const target = new THREE.Vector3(...v.target), pos = new THREE.Vector3(...v.pos);
+    if (!w || !h || v === VIEWS.behind) { camera.clearViewOffset(); scene.fog.near = 40; scene.fog.far = 75; return { pos, target }; }
+    Object.assign(fitCam, { fov: camera.fov, aspect: w / h, near: 0.1, far: 300 });
+    fitCam.updateProjectionMatrix();
+    const dir = pos.clone().sub(target).normalize(), free = (h - INSET.top - INSET.bottom) / h;
+    let lo = 6, hi = 75;
+    for (let i = 0; i < 18; i++) {
+      const d = (lo + hi) / 2, b = frameBox(target, dir, d);
+      if (b.x1 - b.x0 <= 1.94 && (b.y1 - b.y0) / 2 <= free * 0.985) hi = d; else lo = d;
+    }
+    const b = frameBox(target, dir, hi);
+    const centerPx = (h / 2) * (1 - (b.y0 + b.y1) / 2), wantPx = INSET.top + (h - INSET.top - INSET.bottom) / 2;
+    camera.setViewOffset(w, h, ((b.x0 + b.x1) / 2) * (w / 2), centerPx - wantPx, w, h);
+    scene.fog.near = hi + 14; scene.fog.far = hi + 55;
+    return { pos: target.clone().addScaledVector(dir, hi), target };
+  }
   function setView(name) {
-    const v = typeof name === 'object' ? name : VIEWS[name] || VIEWS.persp; // можно передать { pos, target }
-    camAnim = { pos: new THREE.Vector3(...v.pos), target: new THREE.Vector3(...v.target), k: 0 };
+    const v = VIEWS[name] || VIEWS.persp;
+    viewName = name; userCam = false;
+    camAnim = { ...fitView(v), k: 0 };
   }
 
   // ---------- Мышь: клик по полу ----------
@@ -1005,6 +1043,10 @@ export function createCourt3D(el, { onPick, onHover, onWheel } = {}) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    if (userCam) return;
+    const f = fitView(VIEWS[viewName] || VIEWS.persp);
+    if (camAnim) Object.assign(camAnim, { pos: f.pos, target: f.target });
+    else { camera.position.copy(f.pos); controls.target.copy(f.target); }
   }
   new ResizeObserver(resize).observe(el);
   resize();

@@ -24,7 +24,7 @@ function render() {
   const matches = D.matches.filter(m => (F.tour === 'all' || m.tournament === F.tour) && (F.opp === 'all' || m.opponentId === F.opp) && m.roster.some(p => p.id === F.p));
   const people = [...roster].sort((a, b) => (a.active === false) - (b.active === false) || a.num - b.num);
   if (!F.p) F.p = people[0]?.id;
-  $('filters').innerHTML = `<label>Игрок<select data-f="p">${people.map(p => `<option value="${p.id}" ${p.id === F.p ? 'selected' : ''}>#${esc(p.num)} ${esc(p.name)}${p.active === false ? ' (в запасе)' : ''}</option>`).join('')}</select></label>
+  $('filters').innerHTML = `<label>Игрок<select data-f="p">${people.map(p => `<option value="${p.id}" ${p.id === F.p ? 'selected' : ''}>${p.num ? `#${esc(p.num)} ` : ''}${esc(p.name)}${p.active === false ? ' (в запасе)' : ''}</option>`).join('')}</select></label>
     ${tours.length ? `<label>Турнир<select data-f="tour"><option value="all">Все</option>${tours.map(t => `<option value="${t.id}" ${F.tour === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>` : ''}
     <label>Соперник<select data-f="opp"><option value="all">Все</option>${settings.opponents.map(o => `<option value="${o.id}" ${F.opp === o.id ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>`;
   const me = roster.find(p => p.id === F.p) ?? {};
@@ -72,7 +72,7 @@ function render() {
 
   $('app').innerHTML = `
     <section class="dsec phead">
-      <div class="pnum">${esc(me.num ?? '')}</div>
+      <div class="pnum">${esc(me.num || '')}</div>
       <div><h2>${esc(me.name ?? 'Игрок')}</h2><p class="sub">${esc(role)} · ${esc(settings.teamName)} · матчей ${per.length}${me.active === false ? ' · в запасе' : ''}</p></div>
     </section>
     <div class="kpis">

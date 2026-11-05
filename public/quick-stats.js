@@ -217,7 +217,8 @@ async function refresh() {
   settings = s;
 
   const candidates = matches.filter(m => oppFilter === 'all' || m.opponentId === oppFilter);
-  if (matchSel === null) matchSel = candidates[0]?.id ?? 'all';
+  const hashM = location.hash.match(/m=([a-z0-9]+)/)?.[1]; // #m=id — дашборд именно этого матча (ссылка из пульта)
+  if (matchSel === null) matchSel = hashM && candidates.some(m => m.id === hashM) ? hashM : candidates[0]?.id ?? 'all';
   if (matchSel !== 'all' && !candidates.some(m => m.id === matchSel)) matchSel = 'all';
   const rows = candidates.filter(m => matchSel === 'all' || m.id === matchSel).map(m => ({ m, st: replayQuick(m) }));
   const single = rows.length === 1 ? rows[0] : null;

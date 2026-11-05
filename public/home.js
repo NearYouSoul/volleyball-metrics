@@ -76,7 +76,7 @@ function view() {
   return `<div class="hhead"><h1>${greet()}${S.settings.teamName ? `, «${esc(S.settings.teamName)}»` : ''}</h1>${search()}</div>
     <div class="hactions">
       ${act('studio.html#new', 'i-plus', 'Новый матч', 'в студии: видео, 3D, каждое касание', 'primary')}
-      ${last ? act(`studio.html#m=${last.id}`, 'i-play', 'Продолжить', `${esc(last.opponent)} · ${new Date(last.created).toLocaleDateString('ru')} · ${state(last)}`, '', '3') : act('studio.html#home', 'i-film', 'Студия', 'видео и 3D-площадка', '', '3')}
+      ${last ? act(`studio.html#m=${last.id}`, 'i-play', 'Продолжить', `${esc(last.opponent)} · ${new Date(last.created).toLocaleDateString('ru')} · ${state(last)}`, '', '3') : act('studio.html', 'i-film', 'Студия', 'видео и 3D-площадка', '', '3')}
       ${act('quick.html', 'i-bolt', 'Быстрая статистика', 'кто закончил розыгрыш и чем — вживую', 'mfirst', '1')}
       ${act('detailed.html', 'i-phone', 'Пульт для телефона', 'детальная статистика с телефона', 'mfirst', '2')}
       ${act('stats.html', 'i-chart', 'Аналитика', 'дашборд детальной статистики')}
@@ -110,7 +110,7 @@ addEventListener('keydown', e => {
   if (e.target.matches?.('input, textarea, select') || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.code === 'Digit1') location.href = 'quick.html';
   if (e.code === 'Digit2') location.href = 'detailed.html';
-  if (e.code === 'Digit3') location.href = document.querySelector('.hact[href^="studio.html#m="]')?.getAttribute('href') ?? 'studio.html#home';
+  if (e.code === 'Digit3') location.href = document.querySelector('.hact[href^="studio.html#m="]')?.getAttribute('href') ?? 'studio.html';
 });
 
 const get = url => fetch(url).then(r => r.json()).catch(() => null);

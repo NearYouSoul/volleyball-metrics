@@ -26,11 +26,12 @@ async function call(fn) {
   render();
 }
 
+let pushed = false; // запись истории «матч» создали мы — выходить из матча можно кнопкой «Назад» браузера
 function setMatch(match) {
   const changed = ui.match?.id !== match.id;
   ui.match = match;
   ui.st = replay(match);
-  location.hash = 'm=' + match.id;
+  if (location.hash !== '#m=' + match.id) { location.hash = 'm=' + match.id; pushed = true; }
   if (changed) sync.attach(match); // другой матч — подхватываем его очередь (если что-то не ушло)
 }
 
@@ -102,7 +103,7 @@ function viewSettings() {
       Имена можно менять — статистика старых матчей сохранится.</p>
     ${ui.roster.map((p, i) => `
       <div class="rost">
-        <input type="number" inputmode="numeric" value="${esc(p.num)}" data-list="roster" data-i="${i}" data-k="num" placeholder="№">
+        <input type="number" inputmode="numeric" value="${esc(p.num || '')}" data-list="roster" data-i="${i}" data-k="num" placeholder="№">
         <input value="${esc(p.name)}" data-list="roster" data-i="${i}" data-k="name" placeholder="Имя">
         <select data-list="roster" data-i="${i}" data-k="role" style="border-radius:8px;background:rgb(255 255 255 / .05);color:#fff;border:0;padding:10px 4px;font:inherit;font-size:13px">
           <option value="">Роль</option>${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${roleOf(p) === k ? 'selected' : ''}>${r.name}</option>`).join('')}
@@ -303,7 +304,8 @@ async function openMatch(id) {
 }
 
 const handlers = {
-  home: () => call(goHome),
+  // Из матча выходим «Назад» браузера, чтобы не копить записи истории; переход на список делает hashchange.
+  home: () => { if (pushed && ui.match && location.hash.includes('m=')) { pushed = false; history.back(); } else call(goHome); },
   live: () => { ui.view = 'live'; render(); },
   // Правим копии: «Отмена» перечитывает настройки с сервера и выбрасывает изменения.
   settings: () => call(loadSettingsView),
@@ -330,7 +332,7 @@ const handlers = {
   },
   saveSettings: () => call(async () => {
     // «Связующий» в движке — по роли; галочку оставляем для совместимости со старыми матчами.
-    const roster = ui.roster.filter(p => p.num !== '' || p.name.trim()).map(p => ({ ...p, num: Number(p.num), name: p.name.trim(), role: roleOf(p), setter: roleOf(p) === 's' }));
+    const roster = ui.roster.filter(p => p.num !== '' || p.name.trim()).map(p => ({ ...p, num: p.num === '' || p.num == null ? '' : Number(p.num) || '', name: p.name.trim(), role: roleOf(p), setter: roleOf(p) === 's' }));
     const opponents = ui.settings.opponents.filter(o => o.name.trim()).map(o => ({ ...o, name: o.name.trim() }));
     const settings = { teamName: ui.settings.teamName.trim() || 'Мы', opponents, system: ui.settings.system || '5-1' };
     [ui.roster, ui.settings] = await Promise.all([api('PUT', '/api/roster', roster), api('PUT', '/api/settings', settings)]);
@@ -404,4 +406,10 @@ call(async () => {
 });
 
 // Ссылка на настройки, когда пульт уже открыт (смена #settings без перезагрузки).
-addEventListener('hashchange', () => { if (location.hash === '#settings') call(loadSettingsView); });
+addEventListener('hashchange', () => {
+  if (location.hash === '#settings') return call(loadSettingsView);
+  // «Назад»/«Вперёд» браузера: адрес с m= открывает матч, без него — список матчей.
+  const id = location.hash.match(/m=([a-z0-9]+)/)?.[1];
+  if (id && id !== ui.match?.id) call(() => openMatch(id));
+  else if (!id && ui.match) call(goHome);
+});
