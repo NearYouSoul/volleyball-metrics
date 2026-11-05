@@ -69,7 +69,7 @@ function result(key, p = null, cls = '') {
 function viewHome() {
   return `
     <nav class="flex items-center justify-between">
-      <a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Главная</a>
+      ${matchMedia('(pointer: fine)').matches ? '<a class="btn btn-ghost btn-sm -ml-3 gap-2" href="/"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Главная</a>' : '<span class="flex items-center gap-2 text-sm text-ash"><img src="img/logo.svg" alt="" class="size-5 rounded-[5px]">Волей Метрика</span>'}
     </nav>
     <h1 class="mt-6 text-[32px] leading-tight font-normal">Экспресс stat</h1>
     <p class="mt-1 text-ash">${esc(ui.settings.teamName)}. Выберите матч и нажимайте кнопки: всё запишется на компьютер.</p>
@@ -189,7 +189,7 @@ function viewSetOver() {
 }
 
 function render() {
-  const views = { home: viewHome, pickOpponent: viewPickOpponent, serveFirst: viewServeFirst, live: viewLive };
+  const views = { home: viewHome, serveFirst: viewServeFirst, live: viewLive };
   $app.innerHTML = views[ui.view]();
 }
 
