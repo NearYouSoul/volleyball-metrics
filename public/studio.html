@@ -77,12 +77,12 @@
     <section class="stage">
       <div class="viewport" id="viewport" data-layout="split">
         <div class="pane video-pane">
-          <div class="vstage" id="vstage"><video id="video" preload="auto" playsinline></video></div>
+          <div class="vstage" id="vstage"><video id="video" preload="auto" playsinline></video><div class="ythost" id="ytHost" hidden><div id="ytFrame"></div></div></div>
           <canvas class="minimap" id="minimap" width="192" height="108" title="Кликните, чтобы переместить зум"></canvas>
           <div class="video-empty" id="videoEmpty">
             <svg><use href="#i-film"/></svg>
             <b>Видео не выбрано</b>
-            <span>Перетащите файл матча в окно — он скопируется в библиотеку программы.<br>Без видео тоже можно вести статистику.</span>
+            <span>Перетащите файл матча в окно — он скопируется в библиотеку программы. Ссылку на YouTube добавьте во вкладке «Видео».<br>Без видео тоже можно вести статистику.</span>
             <button class="btn" data-a="pickFile"><svg><use href="#i-upload"/></svg>Выбрать файл</button>
           </div>
           <div class="video-hud" id="videoHud"></div>

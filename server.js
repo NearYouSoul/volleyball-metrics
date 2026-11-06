@@ -13,6 +13,7 @@ import { buildTeamPackage, readTeamPackage, applyTeamPackage, buildMatchPackage,
 import { replayQuick } from './public/quick-engine.js';
 import { MODES, MODE_KEYS, emptyStats, migrate, sheet } from './public/modes.js';
 import { hasFfmpeg, probe, plan, convert, cutHighlights } from './media.js';
+import { youtubeId } from './public/studio/player.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -89,7 +90,9 @@ const BACKUPS = path.join(DATA, 'backups');
 async function snapshot() {
   const files = (await readdir(DATA)).filter(f => /^match-[a-z0-9]+\.json$/.test(f));
   const matches = (await Promise.all(files.map(f => readJson(path.join(DATA, f), null).catch(() => null)))).filter(Boolean);
-  return { roster: await readJson(rosterFile, []), settings: await readJson(settingsFile, {}), matches };
+  // Ссылки YouTube весят байты — входят в копию, в отличие от файлов видео.
+  const youtube = (await readJson(videosFile, [])).filter(v => v.youtube);
+  return { roster: await readJson(rosterFile, []), settings: await readJson(settingsFile, {}), matches, youtube };
 }
 async function makeBackup(reason = 'авто') {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23); // с миллисекундами — две копии подряд не затрут друг друга
@@ -119,6 +122,9 @@ async function restoreSnapshot(data) {
     if (!keep.has(f.slice(6, -5))) await toTrash(path.join(DATA, f));
   }
   for (const m of data.matches) if (/^[a-z0-9]+$/.test(m.id)) await writeJson(matchFile(m.id), m);
+  const list = await readJson(videosFile, []);
+  const fresh = (data.youtube ?? []).filter(v => v.youtube && !list.some(x => x.id === v.id));
+  if (fresh.length) await writeJson(videosFile, [...fresh, ...list]);
 }
 // Автокопия раз в день: при запуске и потом каждый час проверяем, есть ли копия за сегодня.
 async function dailyBackup() {
@@ -286,7 +292,7 @@ async function api(req, url) {
     const m = await readMatch(matchFile(em[1]));
     if (!m) return null;
     const refs = await loadRefs();
-    const f = buildMatchPackage(hydrate(m, refs), refs, LABELS);
+    const f = buildMatchPackage(hydrate(m, refs), { ...refs, videos: await readJson(videosFile, []) }, LABELS);
     return download(f.name, f.data);
   }
   if (route === 'POST /api/import/match') {
@@ -295,7 +301,9 @@ async function api(req, url) {
     return serial(async () => {
       const refs = await loadRefs();
       const ids = new Set((await readdir(DATA)).map(f => /^match-([a-z0-9]+)\.json$/.exec(f)?.[1]).filter(Boolean));
-      const { match, roster, opponents } = importMatch({ ...refs, ids }, pkg);
+      const list = await readJson(videosFile, []);
+      const { match, roster, opponents, videos } = importMatch({ ...refs, ids, videos: list }, pkg);
+      if (videos.length) await writeJson(videosFile, [...videos, ...list]);
       await writeJson(rosterFile, roster);
       await writeJson(settingsFile, { ...refs.settings, opponents });
       await writeJson(matchFile(match.id), match);
@@ -354,6 +362,20 @@ async function api(req, url) {
   // ---------- Видеотека ----------
   // Прогресс подготовки видео живёт в памяти — подмешиваем его в список.
   if (route === 'GET /api/videos') return (await readJson(videosFile, [])).map(v => (jobs.has(v.id) ? { ...v, progress: jobs.get(v.id) } : v));
+  // Ссылка на YouTube: в библиотеке рядом с файлами, только без файла. Та же ссылка второй раз не добавляется.
+  if (route === 'POST /api/videos/youtube') {
+    const { url: link, name } = await readBody(req);
+    const youtube = youtubeId(link);
+    if (!youtube) return { error: 'Не похоже на ссылку YouTube' };
+    return serial(async () => {
+      const list = await readJson(videosFile, []);
+      const same = list.find(v => v.youtube === youtube);
+      if (same) return same;
+      const video = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: String(name ?? '').trim() || `YouTube · ${youtube}`, youtube, created: new Date().toISOString(), status: 'ready' };
+      await writeJson(videosFile, [video, ...list]);
+      return video;
+    });
+  }
   // Загрузка: тело запроса — сам файл, имя — в заголовке X-Filename. Пишем потоком: файлы бывают по несколько гигабайт.
   if (route === 'POST /api/videos') {
     const name = decodeURIComponent(req.headers['x-filename'] || 'video.mp4');
@@ -384,7 +406,7 @@ async function api(req, url) {
     if (!hasFfmpeg()) return { error: 'Для нарезки нужен FFmpeg — запустите start.bat с интернетом один раз' };
     const { name, segments } = await readBody(req);
     const list = await readJson(videosFile, []);
-    const segs = (segments || []).map(sg => ({ ...sg, v: list.find(v => v.id === sg.video) })).filter(sg => sg.v && sg.end > sg.start)
+    const segs = (segments || []).map(sg => ({ ...sg, v: list.find(v => v.id === sg.video) })).filter(sg => sg.v?.file && sg.end > sg.start)
       .map(sg => ({ file: path.join(VIDEOS, sg.v.file), start: +sg.start, end: +sg.end }));
     if (!segs.length) return { error: 'Нет отрезков с видео' };
     await mkdir(CLIPS, { recursive: true });
@@ -418,7 +440,7 @@ async function api(req, url) {
       const v = list.find(x => x.id === vm[1]);
       if (!v) return null;
       await mkdir(path.join(TRASH, 'videos'), { recursive: true });
-      await rename(path.join(VIDEOS, v.file), path.join(TRASH, 'videos', v.file)).catch(() => {});
+      if (v.file) await rename(path.join(VIDEOS, v.file), path.join(TRASH, 'videos', v.file)).catch(() => {});
       await writeJson(videosFile, list.filter(x => x !== v));
       return { ok: true };
     });

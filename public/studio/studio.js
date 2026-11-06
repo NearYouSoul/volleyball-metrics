@@ -2,9 +2,10 @@
 // Состояние матча, как и везде, вычисляет engine.js из списка событий на сервере;
 // здесь — только интерфейс: видео, 3D-площадка, ввод касаний, правка и вставка событий.
 import { replay, playerName, LABELS, ACTIONS, SKILLS, totals, attEff, recRating, newPlayer, addStats, setTitle, setTarget, formatOptions, formatKey, pickFormat, formatName, formatOf } from '../engine.js';
-import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones } from '../court.js';
+import { ZONE_SPOT, DEFAULT_SPOT, TEMPOS, SYSTEMS, guessSetter, zoneOf, SET_DIRS, setDir, NET, ROLES, roleOf, zoneOfSlot, slotZones, rotOrder, rotName } from '../court.js';
 import { createCourt3D } from './court3d.js';
 import { initTips } from './tips.js';
+import { createPlayer } from './player.js';
 import { createSettings, modal, emblem, toast, presetsOf } from '../settings-ui.js';
 import { gradeAt, digRes, zonesOf } from '../quality.js';
 import { spotFor, tableFor, ATTACK, SETTER_SPOT, defenseLayout, blockSide, attackByRole } from '../formations.js';
@@ -18,7 +19,9 @@ const store = {
   set: (k, v) => { try { localStorage.setItem('studio.' + k, JSON.stringify(v)); } catch { /* приватный режим */ } },
 };
 
-const video = $('video');
+const rotLabel = r => rotName(r, ui.settings.rotStart);
+// Файл или YouTube — для студии это один плеер с интерфейсом <video>.
+const video = createPlayer($('video'), { host: $('ytHost'), frame: $('ytFrame'), onError: m => toast(m, true) });
 const ui = {
   roster: [], settings: { teamName: 'Мы', opponents: [] }, matches: [], videos: [],
   match: null, full: null, st: null,
@@ -985,7 +988,7 @@ function paintTop() {
   if (s.over) { $('phase').className = 'phase-pill'; $('phase').innerHTML = '<i></i>Партия окончена'; return; }
   const ph = { serve: ['Наша подача', `подаёт ${esc(name(st.rally.server))}`], rec: ['Приём', 'подают они'], ours: ['Мяч у нас', 'пас и атака'], their: ['Мяч у них', 'защита или блок'] }[st.rally.phase];
   $('phase').className = `phase-pill ph-${st.rally.phase}`;
-  $('phase').innerHTML = `<i></i>${ph[0]} <small>${ph[1]} · Р${st.rally.rot}</small><button data-a="flip" title="Мяч на другой стороне (если программа ошиблась)">${icon('i-swap')}</button>`;
+  $('phase').innerHTML = `<i></i>${ph[0]} <small>${ph[1]} · ${rotLabel(st.rally.rot)}</small><button data-a="flip" title="Мяч на другой стороне (если программа ошиблась)">${icon('i-swap')}</button>`;
 }
 
 function tile(id, zone, extra = '') {
@@ -1024,7 +1027,7 @@ function paintDock() {
       <button class="btn sm ghost" data-a="sub">${icon('i-swap')}${ui.sub ? 'Отмена' : 'Замена'}</button></h4>
     <div class="rot">${[4, 3, 2, 5, 6, 1].map(z => tile(byZone(z), z)).join('')}</div>
     ${ui.sub?.out ? `<div class="bench">${bench.map(p => `<button class="ptile" data-a="subIn" data-id="${p.id}"><span class="n${p.num ? '' : ' name'}">${esc(p.num || p.name)}</span><span class="nm">${esc(p.name)}</span></button>`).join('') || '<span class="muted">Запасных нет</span>'}</div>` : ''}
-    <div class="rot-meta"><b>Р${st.rally.rot}</b><span>${esc(SYSTEMS[ui.match.system] || '')}</span><span class="grow"></span>${ui.sub ? '<span>кто уходит?</span>' : ''}</div>
+    <div class="rot-meta"><b>${rotLabel(st.rally.rot)}</b><span>${esc(SYSTEMS[ui.match.system] || '')}</span><span class="grow"></span>${ui.sub ? '<span>кто уходит?</span>' : ''}</div>
   </div>`;
 
   // Центр: палитра действий.
@@ -1170,7 +1173,7 @@ function sideStat() {
   const ours = totals(sum);
   const kpi = (title, v, s2) => `<div class="sk"><span>${title}</span><b>${v}</b><small>${s2}</small></div>`;
   const rows = Object.entries(pl).map(([id, p]) => ({ id, p, tt: totals(p) })).sort((a, b) => b.tt.points - a.tt.points || b.tt.diff - a.tt.diff);
-  const rots = [1, 6, 5, 4, 3, 2].map(r => { const x = t.rot?.[r]; return `<div class="sr ${x && x.so.n >= 2 && x.so.won / x.so.n < 0.45 ? 'weak' : ''}"><b>Р${r}</b><span>${x ? pc(x.so.won, x.so.n) : '–'}</span><small>${x ? `${x.us}:${x.them}` : ''}</small></div>`; }).join('');
+  const rots = rotOrder(ui.settings.rotStart).map(r => { const x = t.rot?.[r]; return `<div class="sr ${x && x.so.n >= 2 && x.so.won / x.so.n < 0.45 ? 'weak' : ''}"><b>${rotLabel(r)}</b><span>${x ? pc(x.so.won, x.so.n) : '–'}</span><small>${x ? `${x.us}:${x.them}` : ''}</small></div>`; }).join('');
   return `<div class="seg statseg"><button class="${scope === 'all' ? 'on' : ''}" data-a="statScope" data-v="all">Матч ${st.setsWon.us}:${st.setsWon.them}</button>${sets}</div>
     <div class="sks">
       ${kpi('Сайд-аут', pc(so.won, so.n), `${so.won} из ${so.n}`)}
@@ -1198,7 +1201,7 @@ function sideVideo() {
     <span style="min-width:0"><b title="${esc(v.name)}">${esc(v.name)}</b><small>${v.status === 'processing'
       ? `${v.mode === 'remux' ? 'переупаковка' : `перекодирование ${(v.codec || '').toUpperCase()} → H.264`} · ${Math.round((v.progress ?? 0) * 100)}%`
       : v.status === 'error' ? `<span style="color:var(--coral)">ошибка подготовки: ${esc(v.error || '')}</span>`
-      : `${v.duration ? fmtShort(v.duration) + ' · ' : ''}${v.height ? v.height + 'p · ' : ''}${mb(v.size)} · ${new Date(v.created).toLocaleDateString('ru')}`}</small>
+      : `${v.duration ? fmtShort(v.duration) + ' · ' : ''}${v.height ? v.height + 'p · ' : ''}${v.youtube ? 'YouTube' : mb(v.size)} · ${new Date(v.created).toLocaleDateString('ru')}`}</small>
       ${v.status === 'processing' ? `<div class="bar2"><i style="width:${(v.progress ?? 0) * 100}%"></i></div>` : ''}</span>
     <span class="acts2">
       ${ui.match && !mv.has(v.id) ? `<button class="ibtn" data-a="linkVideo" data-id="${v.id}" title="Привязать к матчу">${icon('i-plus')}</button>` : ''}
@@ -1211,6 +1214,7 @@ function sideVideo() {
   const rest = ui.videos.filter(v => !mv.has(v.id));
   return `
     <div class="dropzone" data-a="pickFile">${icon('i-upload')}<b>Добавить видео</b>Перетащите файл сюда или в любое место окна. Подойдёт любой формат: что не играет браузер (H.265/HEVC с iPhone, ProRes, AVI…), FFmpeg сам переведёт в H.264. Файл копируется в data/videos.</div>
+    <div class="ytadd"><input id="ytUrl" placeholder="Или ссылка на YouTube" autocomplete="off"><button class="btn sm" data-a="ytAdd">Добавить</button></div>
     ${ups ? `<h3>Загрузка</h3><div class="vlist">${ups}</div>` : ''}
     ${ui.match ? `<h3>В этом матче</h3><div class="vlist">${inMatch.map(item).join('') || '<p class="muted">Нет привязанных видео. Если матч снят несколькими файлами — привяжите все.</p>'}</div>` : ''}
     <h3>Библиотека</h3><div class="vlist">${rest.map(item).join('') || '<p class="muted">Пусто.</p>'}</div>
@@ -1292,7 +1296,7 @@ function paintHud() {
   const has = !!video.src;
   $('videoEmpty').style.display = has ? 'none' : '';
   $('viewport').classList.toggle('novideo', !has);
-  $('videoHud').innerHTML = has && ui.st?.set ? `<span>Р${ui.st.rally.rot}</span>${last ? `<span>${esc(last.text)}</span>` : ''}` : '';
+  $('videoHud').innerHTML = has && ui.st?.set ? `<span>${rotLabel(ui.st.rally.rot)}</span>${last ? `<span>${esc(last.text)}</span>` : ''}` : '';
   const hint = [];
   const c = ctx();
   if (ui.editPoints && ui.edit !== null) hint.push('<span><b>Правка точек</b> события №' + (ui.edit + 1) + ' — клик: куда, Shift+клик: откуда</span>');
@@ -1358,7 +1362,7 @@ function paintLineup() {
   const d = ui.lineupDraft, n = ui.st.sets.length + 1;
   const pl = curPreset().lineup;
   const fromPreset = pl?.start?.length === 6 ? `<div class="field">Старт из пресета «${esc(curPreset().name)}» — нажмите расстановку, порядок подачи посчитается сам
-      <div class="seg">${[1, 6, 5, 4, 3, 2].map(r => `<button class="${d.fromRot === r ? 'on' : ''}" data-a="lrot" data-v="${r}">Р${r}</button>`).join('')}</div></div>`
+      <div class="seg">${rotOrder(ui.settings.rotStart).map(r => `<button class="${d.fromRot === r ? 'on' : ''}" data-a="lrot" data-v="${r}">${rotLabel(r)}</button>`).join('')}</div></div>`
     : `<p class="tip-inline">Совет: задайте состав пресета в редакторе расстановок — тогда партию можно начинать одной кнопкой Р1–Р6.</p>`;
   const roster = [...ui.match.roster].sort((a, b) => a.num - b.num);
   const chosen = d.order.map(id => person(id));
@@ -1460,7 +1464,8 @@ function openVideo(id, { keepTime = false } = {}) {
   if (v.status === 'processing') return toast('Видео ещё готовится — откроется само, когда будет готово');
   const t = keepTime ? video.currentTime : null;
   ui.activeVideo = id;
-  video.src = '/media/' + encodeURIComponent(v.file);
+  if (v.youtube) video.openYoutube(v.youtube, { duration: v.duration });
+  else video.src = '/media/' + encodeURIComponent(v.file);
   if (t) video.currentTime = t;
   if (ui.match) store.set('video.' + ui.match.id, id);
   render();
@@ -1581,7 +1586,7 @@ function sideRallies() {
     html += `<div class="${cls}" data-a="pickRally" data-k="${r.key}">
       <span class="t ${r.t0 == null ? 'none' : ''}">${r.t0 == null ? '—' : fmtShort(r.t0)}</span>
       <span class="sc">${r.after ? r.after.join(':') : '…'}</span>
-      <span class="body"><b>${r.won === true ? 'Очко нам' : r.won === false ? 'Очко им' : 'Идёт'}</b> · Р${r.rot} · ${r.weServe ? 'наша подача' : 'приём'}<small>${esc(rallySummary(r))}</small>${r.note ? `<em class="note">${esc(r.note)}</em>` : ''}</span>
+      <span class="body"><b>${r.won === true ? 'Очко нам' : r.won === false ? 'Очко им' : 'Идёт'}</b> · ${rotLabel(r.rot)} · ${r.weServe ? 'наша подача' : 'приём'}<small>${esc(rallySummary(r))}</small>${r.note ? `<em class="note">${esc(r.note)}</em>` : ''}</span>
       <span class="racts"><button class="rowstar ${r.star ? 'on' : ''}" data-a="rallyStar" data-k="${r.key}" title="${r.star ? 'Убрать из избранного' : 'В избранное (лучшие моменты)'}">${r.star ? '★' : '☆'}</button>
       ${r.star ? `<button class="rowdel" data-a="rallyNote" data-k="${r.key}" title="Заметка">✎</button>` : ''}
       <button class="rowdel" data-a="rallyDel" data-k="${r.key}" title="Удалить розыгрыш целиком">${icon('i-x')}</button></span></div>`;
@@ -1808,7 +1813,7 @@ function applyZoom() {
   clampZoom();
   video.style.transform = vz.z > 1.001 ? `translate(${vz.x}px, ${vz.y}px) scale(${vz.z})` : '';
   vstage.classList.toggle('zoomed', vz.z > 1.001);
-  mini.classList.toggle('on', vz.z > 1.001 && !!video.src);
+  mini.classList.toggle('on', vz.z > 1.001 && !!video.src && !video.isYoutube);
   $('zoomVal').textContent = Math.round(vz.z * 100) + '%';
   drawMini();
   clearTimeout(zoomSave);
@@ -1858,7 +1863,7 @@ function drawMini() {
   const vk = Math.min(W / video.videoWidth, H / video.videoHeight); // object-fit: contain
   const vw = video.videoWidth * vk, vh = video.videoHeight * vk;
   g.fillStyle = '#000'; g.fillRect(0, 0, mini.width, mini.height);
-  g.drawImage(video, ox + ((W - vw) / 2) * k, oy + ((H - vh) / 2) * k, vw * k, vh * k);
+  g.drawImage(video.el, ox + ((W - vw) / 2) * k, oy + ((H - vh) / 2) * k, vw * k, vh * k);
   g.strokeStyle = '#fff'; g.lineWidth = 2;
   g.strokeRect(ox + (-vz.x / vz.z) * k, oy + (-vz.y / vz.z) * k, (W / vz.z) * k, (H / vz.z) * k);
 }
@@ -1910,6 +1915,8 @@ video.addEventListener('loadedmetadata', () => {
   restoreZoom();
   const v = ui.videos.find(x => x.id === ui.activeVideo);
   if (v && !v.duration && video.duration) api('PATCH', `/api/videos/${v.id}`, { duration: video.duration }).then(nv => Object.assign(v, nv));
+  // Название ролика знает только плеер: подставляем вместо временного «YouTube · id».
+  if (v?.youtube && video.title && v.name === `YouTube · ${v.youtube}`) api('PATCH', `/api/videos/${v.id}`, { name: video.title }).then(nv => { Object.assign(v, nv); if (ui.tab === 'video') paintSide(); });
   paintTimeline(); paintHead();
 });
 video.addEventListener('play', paintHead);
@@ -2043,8 +2050,10 @@ const H = {
   rallyNote: d => { const r = rallyByKey(d.k); if (!r) return; const note = prompt('Заметка к моменту (например, «лучший блок»):', r.note); if (note !== null) updateEvent(r.plays[0].i, { note: note.trim() || undefined }); },
   rallyClips: () => playList(rallySegments()),
   exportClips: () => {
-    const segs = rallySegments();
-    if (!segs.length) return;
+    const all = rallySegments();
+    if (!all.length) return;
+    const segs = all.filter(sg => !ui.videos.find(v => v.id === sg.v)?.youtube);
+    if (!segs.length) return toast('Нарезка работает только с файлами: ролик YouTube нельзя склеить в mp4', true);
     const name = `${ui.settings.teamName} — ${ui.match.opponent}${ui.rFilter === 'star' ? ' лучшее' : ''}`;
     toast(`Готовлю нарезку из ${segs.length} розыгрышей… это может занять минуту`);
     call(async () => {
@@ -2092,11 +2101,18 @@ const H = {
     sendRaw({ t: 'set', lineup: d.order, weServe: d.weServe, ...(setter && { setter }), ...(d.target && { target: d.target }) });
   },
   openVideo: d => openVideo(d.id),
+  ytAdd: () => call(async () => {
+    const r = await api('POST', '/api/videos/youtube', { url: $('ytUrl').value });
+    if (r.error) return toast(r.error, true);
+    ui.videos = await api('GET', '/api/videos');
+    if (ui.match && !ui.match.videos?.includes(r.id)) await linkVideo(r.id);
+    openVideo(r.id);
+  }),
   linkVideo: d => call(() => linkVideo(d.id)),
   unlinkVideo: d => call(async () => setMatch(await api('PATCH', `/api/matches/${ui.match.id}`, { videos: ui.match.videos.filter(x => x !== d.id) }))),
   delVideo: d => {
     const v = ui.videos.find(x => x.id === d.id);
-    if (!confirm(`Удалить «${v.name}» из библиотеки? Файл переедет в data/trash/videos.`)) return;
+    if (!confirm(`Удалить «${v.name}» из библиотеки?${v.youtube ? '' : ' Файл переедет в data/trash/videos.'}`)) return;
     call(async () => { await api('DELETE', `/api/videos/${d.id}`); ui.videos = await api('GET', '/api/videos'); if (ui.activeVideo === d.id) { ui.activeVideo = null; video.removeAttribute('src'); video.load(); } });
   },
   pickEv: (d, e) => { if (e.target.closest('.editor')) return; pickEvent(+d.i); },
@@ -2159,6 +2175,7 @@ document.addEventListener('input', e => {
 // ---------- Клавиатура ----------
 const CODE_LETTER = { KeyA: 'A', KeyS: 'S', KeyD: 'D', KeyF: 'F', KeyG: 'G', KeyH: 'H', KeyQ: 'Q', KeyW: 'W', KeyE: 'E', KeyR: 'R', KeyT: 'T', KeyY: 'Y' };
 document.addEventListener('keydown', e => {
+  if (e.target.id === 'ytUrl' && e.key === 'Enter') return H.ytAdd();
   const tag = e.target.tagName;
   if (tag === 'INPUT' && e.target.type !== 'checkbox' && e.target.type !== 'range' || tag === 'SELECT' || tag === 'TEXTAREA') {
     return;

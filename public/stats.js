@@ -1,7 +1,7 @@
 // Аналитика детальных режимов (Студия PRO, Ручной PRO): обзор, ход партии, тепловые карты, отчёт связующего,
 // расстановки, игроки. Всё считается из «розыгрыша по касаниям» (plays) движка. Встраивается в раздел «Аналитика» (analytics.js).
 import { replay, totals, newPlayer, playerName, addStats, ACTIONS, LABELS, REC_RATING, attEff, recRating, SKILLS, timeoutEffect } from './engine.js';
-import { slotZones, zoneOfSlot, SYSTEMS, zoneOf, TEMPOS, NET } from './court.js';
+import { slotZones, zoneOfSlot, SYSTEMS, zoneOf, TEMPOS, NET, rotOrder, rotName } from './court.js';
 import { courtBase, heat, svgWrap, sx, sy } from './studio/court2d.js';
 
 let $app = null, $extras = null, timer = null;
@@ -61,7 +61,7 @@ function filters(v) {
   const sel = (k, opts, label) => `<label>${label}<select data-f="${k}">${opts.map(([val, t]) => `<option value="${val}" ${String(F[k]) === String(val) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>`;
   const people = [...v.people].sort((a, b) => a.num - b.num);
   return [
-    sel('rot', [['all', 'Все'], ...[1, 2, 3, 4, 5, 6].map(r => [r, `Р${r}`])], 'Расстановка'),
+    sel('rot', [['all', 'Все'], ...rotOrder(v.settings.rotStart).map(r => [r, rotName(r, v.settings.rotStart)])], 'Расстановка'),
     sel('phase', [['all', 'Все розыгрыши'], ['so', 'Сайд-аут (подают они)'], ['brk', 'Брейк (подаём мы)']], 'Фаза'),
     sel('player', [['all', 'Вся команда'], ...people.map(p => [p.id, playerName({ roster: people }, p.id)])], 'Игрок'),
   ].join('');
@@ -98,7 +98,7 @@ function overview(v) {
   const pts = totals(sum);
   return `<section class="dsec" id="overview">
     <h2>Обзор</h2>
-    <p class="sub">${v.rows.length === 1 ? `${emb(v.settings.emblem)}${esc(v.settings.teamName)} ${v.rows[0].st.setsWon.us}:${v.rows[0].st.setsWon.them} ${emb(v.settings.opponents.find(o => o.id === v.rows[0].m.opponentId)?.emblem)}${esc(v.rows[0].m.opponent)} · ${v.rows[0].st.sets.map(s => `${s.us}:${s.them}`).join(', ')}` : `${emb(v.settings.emblem)}Матчей: ${v.rows.length}`}${F.rot !== 'all' ? ` · только расстановка Р${F.rot}` : ''}</p>
+    <p class="sub">${v.rows.length === 1 ? `${emb(v.settings.emblem)}${esc(v.settings.teamName)} ${v.rows[0].st.setsWon.us}:${v.rows[0].st.setsWon.them} ${emb(v.settings.opponents.find(o => o.id === v.rows[0].m.opponentId)?.emblem)}${esc(v.rows[0].m.opponent)} · ${v.rows[0].st.sets.map(s => `${s.us}:${s.them}`).join(', ')}` : `${emb(v.settings.emblem)}Матчей: ${v.rows.length}`}${F.rot !== 'all' ? ` · только расстановка ${rotName(+F.rot, v.settings.rotStart)}` : ''}</p>
     <div class="kpis">
       ${kpi('Сайд-аут', pc(so.won, so.n), `выиграли ${so.won} из ${so.n} на их подаче`)}
       ${kpi('Брейк', pc(brk.won, brk.n), `выиграли ${brk.won} из ${brk.n} на своей подаче`)}
@@ -198,7 +198,7 @@ function heatSection(v) {
     const setTo = new Map(v.plays.filter(p => p.skill === 'set' && p.to).map(p => [`${p.mid}:${p.set}:${p.rally}`, p.to]));
     inner += pts.map(p => { const f = p.from ?? setTo.get(`${p.mid}:${p.set}:${p.rally}`); return f ? `<line class="traj" x1="${sx(f)}" y1="${sy(f)}" x2="${sx(p.to)}" y2="${sy(p.to)}" stroke="${colorOf(p)}"/>` : ''; }).join('');
   }
-  if (F.dots) inner += pts.map(p => `<circle class="dot" cx="${sx(p.to)}" cy="${sy(p.to)}" r=".2" fill="${colorOf(p)}" data-tip="<b>${v.nm(p.p)}</b><br>${esc(LABELS[p.skill][p.res])}<br>партия ${p.set + 1} · счёт ${p.score[0]}:${p.score[1]} · Р${p.rot}"/>`).join('');
+  if (F.dots) inner += pts.map(p => `<circle class="dot" cx="${sx(p.to)}" cy="${sy(p.to)}" r=".2" fill="${colorOf(p)}" data-tip="<b>${v.nm(p.p)}</b><br>${esc(LABELS[p.skill][p.res])}<br>партия ${p.set + 1} · счёт ${p.score[0]}:${p.score[1]} · ${rotName(p.rot, v.settings.rotStart)}"/>`).join('');
   const svg = svgWrap(H.half, inner);
   // Зоны: сколько касаний и какой процент успешных.
   const byZone = {};
@@ -266,12 +266,12 @@ function setterSection(v) {
     + crossRow('Концовка партии (20+)', all.filter(p => Math.max(...p.score) >= 20))
     + crossRow('Всего', all);
   // По расстановкам: доли направлений.
-  const rotRows = [1, 2, 3, 4, 5, 6].map(r => {
+  const rotRows = rotOrder(v.settings.rotStart).map(r => {
     const list = all.filter(p => p.rot === r), st = stat(list);
-    if (!st.n) return `<tr><td class="l">Р${r}</td><td colspan="4" class="muted">нет пасов</td></tr>`;
+    if (!st.n) return `<tr><td class="l">${rotName(r, v.settings.rotStart)}</td><td colspan="4" class="muted">нет пасов</td></tr>`;
     const parts = DIR_ORDER.map(d => ({ n: list.filter(p => p.key === d).length, c: DIR_COLOR[d], t: DIRS[d] }));
     const top = parts.reduce((a, b) => (b.n > a.n ? b : a));
-    return `<tr><td class="l">Р${r}</td><td>${st.n}</td><td style="min-width:220px">${bar(parts)}</td><td class="l">${esc(top.t)} · ${P(top.n, st.n)}%</td><td>${st.kp}%</td></tr>`;
+    return `<tr><td class="l">${rotName(r, v.settings.rotStart)}</td><td>${st.n}</td><td style="min-width:220px">${bar(parts)}</td><td class="l">${esc(top.t)} · ${P(top.n, st.n)}%</td><td>${st.kp}%</td></tr>`;
   }).join('');
   // Темп и нападающие.
   const tempoRows = [...Object.entries(TEMPOS).map(([k, t]) => [k, t.label]), [null, 'Не указан']].map(([k, label]) => {
@@ -316,7 +316,7 @@ function rotSection(v) {
   const t = teamAgg(v);
   const last = v.rows.map(r => r.st.sets[0]).find(Boolean);
   const pl = v.plays;
-  const cards = [1, 2, 3, 4, 5, 6].map(r => {
+  const cards = rotOrder(v.settings.rotStart).map(r => {
     const rc = t.rot?.[r] || { so: { n: 0, won: 0 }, brk: { n: 0, won: 0 }, us: 0, them: 0 };
     let mini = '';
     if (last) {
@@ -330,7 +330,7 @@ function rotSection(v) {
     const k = att.filter(p => p.res === 'kill' || p.res === 'bo').length;
     const rec = pl.filter(p => p.rot === r && p.skill === 'rec');
     const rr = rec.length ? (rec.reduce((a, p) => a + REC_RATING[p.res], 0) / rec.length).toFixed(2) : '–';
-    return { r, rc, html: (cls, tag) => `<div class="rcard ${cls}"><h4>Р${r}<small>связующий в зоне ${r}</small>${tag}</h4>${mini}
+    return { r, rc, html: (cls, tag) => `<div class="rcard ${cls}"><h4>${rotName(r, v.settings.rotStart)}<small>связующий в зоне ${r}</small>${tag}</h4>${mini}
       <div class="rstat">
         <span>Сайд-аут</span><b>${pc(rc.so.won, rc.so.n)} <small class="muted">${rc.so.won}/${rc.so.n}</small></b><div class="meter"><i style="width:${P(rc.so.won, rc.so.n) ?? 0}%"></i></div>
         <span>Брейк</span><b>${pc(rc.brk.won, rc.brk.n)} <small class="muted">${rc.brk.won}/${rc.brk.n}</small></b><div class="meter"><i style="width:${P(rc.brk.won, rc.brk.n) ?? 0}%;background:var(--sky)"></i></div>
@@ -344,7 +344,7 @@ function rotSection(v) {
   const weak = withData.length > 1 ? withData.reduce((a, b) => (so(b) < so(a) ? b : a)).r : null;
   const strong = withData.length > 1 ? withData.reduce((a, b) => (so(b) > so(a) ? b : a)).r : null;
   return `<section class="dsec" id="rot"><h2>Расстановки</h2>
-    <p class="sub">Р1…Р6 — по зоне, где стоит основной связующий (его выбирают при старте партии). Схема: ${esc(SYSTEMS[v.rows[0]?.m.system] || '—')}. Площадки — стартовая шестёрка первой партии.</p>
+    <p class="sub">Р1 — стартовая расстановка команды, связующий в зоне ${rotOrder(v.settings.rotStart)[0]}. Дальше номера идут по ходу игры: Р2, Р3 и так далее. Стартовая зона меняется в «Настройки → Команда». Схема: ${esc(SYSTEMS[v.rows[0]?.m.system] || '—')}. Площадки — стартовая шестёрка первой партии.</p>
     <div class="rots">${cards.map(c => c.html(c.r === weak ? 'weak' : c.r === strong ? 'strong' : '', c.r === weak ? '<span class="tag neg">слабая</span>' : c.r === strong ? '<span class="tag pos">сильная</span>' : '')).join('')}</div></section>`;
 }
 
@@ -514,6 +514,7 @@ export async function show(body, extras, A) {
   const keep = F.src === A.src && DATA;
   Object.assign(F, { src: A.src, tour: A.tour, opp: A.opp, match: A.match, set: A.set });
   if (!keep) await load();
+  else DATA.settings = await fetch('/api/settings').then(r => r.json()); // например, сменили стартовую расстановку
   render();
   timer = setInterval(async () => {
     if (document.hidden || document.activeElement?.tagName === 'SELECT' || !$app?.isConnected) return;
@@ -543,7 +544,7 @@ export function exportCsv() {
   const head = ['Матч', 'Соперник', 'Партия', 'Розыгрыш', 'Счёт', 'Расстановка', 'Подача', 'Игрок', 'Навык', 'Результат', 'Темп', 'Куда пас', 'Кому пас', 'Откуда x', 'Откуда y', 'Куда x', 'Куда y', 'Время видео', 'Розыгрыш выигран'];
   const byId = Object.fromEntries(v.rows.map(r => [r.m.id, r.m]));
   const rows = v.plays.filter(p => !p.virtual && (F.player === 'all' || p.p === F.player)).map(p => [
-    dt(byId[p.mid]), byId[p.mid].opponent, p.set + 1, p.rally + 1, `${p.score[0]}:${p.score[1]}`, 'Р' + p.rot, p.weServe ? 'наша' : 'их',
+    dt(byId[p.mid]), byId[p.mid].opponent, p.set + 1, p.rally + 1, `${p.score[0]}:${p.score[1]}`, rotName(p.rot, v.settings.rotStart), p.weServe ? 'наша' : 'их',
     p.p ? playerName({ roster: v.people }, p.p) : '', SKILLS[p.skill] ?? p.skill, LABELS[p.skill]?.[p.res] ?? p.res, p.tempo ? TEMPOS[p.tempo]?.short ?? p.tempo : '', p.dir ? DIRS[dirKey(p.dir)] ?? p.dir : '', p.target ? playerName({ roster: v.people }, p.target) : '',
     p.from?.x ?? '', p.from?.y ?? '', p.to?.x ?? '', p.to?.y ?? '', p.vt ?? '', p.won == null ? '' : p.won ? 'да' : 'нет',
   ]);

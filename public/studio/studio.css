@@ -139,6 +139,12 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 .vstage.zoomed.pan { cursor: grabbing; }
 video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; transform-origin: 0 0; will-change: transform; }
 .minimap { position: absolute; z-index: 2; right: 12px; bottom: 12px; width: 192px; height: 108px; border-radius: 8px; background: #000; box-shadow: 0 0 0 1px rgb(255 255 255 / .2), 0 8px 24px rgb(0 0 0 / .5); display: none; cursor: crosshair; }
+/* YouTube поверх <video>. Клики идут мимо плеера, иначе он забирает клавиатуру и горячие клавиши перестают работать. */
+.ythost { position: absolute; inset: 0; background: #000; transform-origin: 0 0; will-change: transform; }
+.ythost[hidden] { display: none; }
+.ythost iframe { width: 100%; height: 100%; border: 0; display: block; pointer-events: none; }
+.ytadd { display: flex; gap: 6px; margin-top: 8px; }
+.ytadd input { flex: 1; min-width: 0; }
 .minimap.on { display: block; }
 .zoomctl { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; padding: 2px; border-radius: 9px; background: var(--well); }
 .zoomctl .ibtn { width: 26px; height: 26px; font-size: 16px; font-weight: 600; }

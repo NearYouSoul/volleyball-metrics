@@ -69,6 +69,27 @@ test('сервер: видео — загрузка и перемотка (Range
   assert.equal((await fetch(`${URL_}/media/..%2Froster.json`)).status, 404);
 });
 
+test('сервер: ссылка YouTube — библиотека, без дублей, нарезка, копия, удаление', async () => {
+  const bad = (await api('POST', '/api/videos/youtube', { url: 'https://vimeo.com/1' })).json;
+  assert.match(bad.error, /YouTube/);
+  const v = (await api('POST', '/api/videos/youtube', { url: 'https://youtu.be/dQw4w9WgXcQ?si=1' })).json;
+  assert.equal(v.youtube, 'dQw4w9WgXcQ');
+  assert.equal(v.file, undefined);
+  const again = (await api('POST', '/api/videos/youtube', { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })).json;
+  assert.equal(again.id, v.id);
+  assert.ok((await api('GET', '/api/videos')).json.some(x => x.id === v.id));
+  // Нарезать нечего: нет файла. Падать сервер не должен.
+  assert.ok((await api('POST', '/api/clips', { segments: [{ video: v.id, start: 1, end: 2 }] })).json.error);
+  // Копия одним файлом несёт ссылку: удалили — восстановили — вернулась.
+  const backup = (await api('GET', '/api/backup/file')).json;
+  assert.ok(backup.youtube.some(x => x.id === v.id));
+  assert.equal((await api('DELETE', `/api/videos/${v.id}`)).json.ok, true);
+  assert.ok(!(await api('GET', '/api/videos')).json.some(x => x.id === v.id));
+  assert.equal((await api('POST', '/api/backup/file', backup)).json.ok, true);
+  assert.ok((await api('GET', '/api/videos')).json.some(x => x.id === v.id));
+  assert.equal((await api('DELETE', `/api/videos/${v.id}`)).json.ok, true);
+});
+
 test('сервер: резервная копия, восстановление, корзина', async () => {
   const m = (await api('POST', '/api/matches', { opponentId: 'x' })).json;
   const b = (await api('POST', '/api/backups')).json;

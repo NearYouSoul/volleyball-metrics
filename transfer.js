@@ -13,7 +13,7 @@ export const TEAM_PARTS = {
   play: 'Схема игры, расстановки, зоны доводки',
   opps: 'Соперники и их эмблемы',
 };
-const PLAY_KEYS = ['system', 'formations', 'presets', 'activePreset', 'qualityZones'];
+const PLAY_KEYS = ['system', 'formations', 'presets', 'activePreset', 'qualityZones', 'rotStart'];
 
 const slug = s => String(s || 'team').trim().replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_').slice(0, 40) || 'team';
 const stamp = (d = new Date()) => d.toISOString().slice(0, 10);
@@ -86,10 +86,10 @@ export function applyTeamPackage({ roster, settings }, team, parts = team.parts 
 
 // ---------- Один матч ----------
 // Матч целиком (события, состав на матч, привязка видео по имени файла) + соперник с эмблемой + события таблицей.
-export function buildMatchPackage(raw, { settings }, labels = {}, when = new Date()) {
+export function buildMatchPackage(raw, { settings, videos = [] }, labels = {}, when = new Date()) {
   const match = migrate(raw);
   const opp = settings.opponents?.find(o => o.id === match.opponentId) ?? null;
-  const pkg = { format: MATCH_FORMAT, version: 1, exported: when.toISOString(), teamName: settings.teamName, opponent: opp ? { id: opp.id, name: opp.name, emblem: opp.emblem ?? null } : { name: match.opponent }, match };
+  const pkg = { format: MATCH_FORMAT, version: 1, exported: when.toISOString(), teamName: settings.teamName, opponent: opp ? { id: opp.id, name: opp.name, emblem: opp.emblem ?? null } : { name: match.opponent }, match, videos: videos.filter(v => v.youtube && match.videos?.includes(v.id)).map(({ id, name, youtube, duration }) => ({ id, name, youtube, duration })) };
   const events = MODE_KEYS.flatMap(k => match.stats[k].events.map(e => ({ ...e, mode: MODES[k].name })));
   const name = id => { const p = match.roster.find(x => x.id === id); return p ? `${p.num ?? ''} ${p.name ?? ''}`.trim() : ''; };
   const rows = [['№', 'Режим', 'Время видео, с', 'Действие', 'Результат', 'Игрок', 'Откуда x', 'Откуда y', 'Куда x', 'Куда y']];
@@ -112,17 +112,27 @@ export function readMatchPackage(buf) {
 }
 // Добавить матч: новый id, если такой уже есть; соперник — найти по id/названию или добавить;
 // игроки из состава матча, которых нет в команде, добавляются «в запас» (чтобы имена в отчётах были).
-export function importMatch({ roster, settings, ids }, pkg) {
+export function importMatch({ roster, settings, ids, videos = [] }, pkg) {
   const m = migrate(structuredClone(pkg.match));
   if (ids.has(m.id)) m.id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
   const opps = (settings.opponents ?? []).map(o => ({ ...o }));
   let opp = opps.find(o => o.id === pkg.opponent?.id) ?? opps.find(o => (o.name || '').trim().toLowerCase() === (pkg.opponent?.name || '').trim().toLowerCase());
   if (!opp && pkg.opponent?.name) { opp = { id: pkg.opponent.id || `o${Date.now().toString(36)}`, name: pkg.opponent.name, ...(pkg.opponent.emblem && { emblem: pkg.opponent.emblem }) }; opps.push(opp); }
   if (opp) { m.opponentId = opp.id; m.opponent = opp.name; }
-  m.videos = []; // видео — на другом компьютере; привязывается заново
+  // Файлы видео остались на другом компьютере и привязываются заново. Ссылки YouTube работают везде — переезжают с матчем.
+  m.videos = [];
+  const added = [];
+  for (const v of pkg.videos ?? []) {
+    if (!v.youtube) continue;
+    const same = [...videos, ...added].find(x => x.youtube === v.youtube);
+    if (!same) added.push(v);
+    const id = same?.id ?? v.id;
+    m.videos.push(id);
+    if (id !== v.id) for (const k of MODE_KEYS) for (const e of m.stats[k].events) if (e.v === v.id) e.v = id;
+  }
   const outRoster = roster.map(p => ({ ...p }));
   for (const p of m.roster ?? []) if (!outRoster.some(x => x.id === p.id)) outRoster.push({ ...p, active: false });
-  return { match: m, roster: outRoster, opponents: opps };
+  return { match: m, roster: outRoster, opponents: opps, videos: added };
 }
 
 // ---------- Таблица статистики игроков (все детальные матчи) ----------

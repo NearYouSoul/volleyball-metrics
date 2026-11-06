@@ -43,8 +43,19 @@ export const isFront = zone => zone >= 2 && zone <= 4;
 // Зоны всех шести слотов: [зона слота 0, зона слота 1, …].
 export const slotZones = z1 => [0, 1, 2, 3, 4, 5].map(s => zoneOfSlot(s, z1));
 
-// Расстановка (Р1…Р6) называется по зоне, где стоит основной связующий — как в DataVolley/VolleyStation.
+// Внутри программы расстановка — это зона основного связующего: на ней держатся пресеты и матчи.
 export const rotationOf = (setterSlot, z1) => zoneOfSlot(setterSlot < 0 ? 0 : setterSlot, z1);
+
+// А человеку номер показываем по ходу игры: Р1 — стартовая расстановка команды, дальше Р2, Р3… с каждым переходом.
+// Игроки идут по часовой стрелке, поэтому связующий из зоны 3 уходит в 2, потом в 1, в 6, в 5, в 4.
+// С какой зоны начинает команда — настройка rotStart.
+const ZONE_CYCLE = [1, 6, 5, 4, 3, 2];
+export const ROT_START = 3;
+export const rotOrder = (start = ROT_START) => {
+  const i = ZONE_CYCLE.includes(+start) ? ZONE_CYCLE.indexOf(+start) : ZONE_CYCLE.indexOf(ROT_START);
+  return [...ZONE_CYCLE.slice(i), ...ZONE_CYCLE.slice(0, i)];
+};
+export const rotName = (zone, start) => `Р${rotOrder(start).indexOf(zone) + 1}`;
 
 // Схемы игры. Связующий в схеме — подсказка, кто вероятнее всего делает пас (его можно поменять в каждом касании).
 //   5-1 — один связующий; 4-2 — двое, пасует тот, кто в передней линии; 6-2 — двое, пасует тот, кто в задней;

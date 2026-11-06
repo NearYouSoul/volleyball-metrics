@@ -151,7 +151,7 @@ const ui = {
   get settings() { return S.settings; }, set settings(v) { S.settings = v; },
   get matches() { return S.matches; }, set matches(v) { S.matches = v; },
 };
-const settings = createSettings({ ui, onChanged: () => refresh(), onMatchCreated: m => { S.open = m.id; refresh(); } });
+const settings = createSettings({ ui, onChanged: () => refresh().then(() => { if (S.view === 'analytics') route(); }), onMatchCreated: m => { S.open = m.id; refresh(); } });
 
 const get = url => fetch(url).then(r => r.json()).catch(() => null);
 async function refresh() {

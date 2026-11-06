@@ -67,6 +67,23 @@ test('матч: архив → другой компьютер: новый id п
   assert.ok(res.roster.every(p => p.active === false)); // новые игроки — в запас
 });
 
+test('матч: ссылка YouTube переезжает с матчем, файл — нет; такая же ссылка не дублируется', () => {
+  const ev = { t: 'act', skill: 'serve', res: 'ace', p: 'a', v: 'yt1', vt: 12 };
+  const match = { id: 'm1', opponentId: 'o1', opponent: 'Северные', created: '2026-11-03T10:00:00Z', roster, videos: ['yt1', 'file1'], stats: { studio: { events: [ev] } } };
+  const videos = [{ id: 'yt1', name: 'Финал', youtube: 'dQw4w9WgXcQ', duration: 600 }, { id: 'file1', name: 'a.mp4', file: 'a.mp4' }];
+  const back = readMatchPackage(buildMatchPackage(match, { settings, videos }, {}).data);
+  assert.deepEqual(back.videos.map(v => v.id), ['yt1']);
+  const fresh = importMatch({ roster: [], settings: { opponents: [] }, ids: new Set() }, back);
+  assert.deepEqual(fresh.match.videos, ['yt1']);
+  assert.equal(fresh.videos[0].youtube, 'dQw4w9WgXcQ');
+  assert.equal(fresh.match.stats.studio.events[0].v, 'yt1');
+  // Ссылка уже есть в библиотеке под другим id: касания переводятся на неё.
+  const same = importMatch({ roster: [], settings: { opponents: [] }, ids: new Set(), videos: [{ id: 'mine', youtube: 'dQw4w9WgXcQ' }] }, back);
+  assert.deepEqual(same.videos, []);
+  assert.deepEqual(same.match.videos, ['mine']);
+  assert.equal(same.match.stats.studio.events[0].v, 'mine');
+});
+
 test('таблица статистики: строка на игрока, Excel-формат (BOM, «;»)', () => {
   const m = { id: 'm1', roster, events: [{ t: 'set', lineup: ['a', 'b', 'a', 'b', 'a', 'b'], weServe: true }, { t: 'act', skill: 'serve', res: 'ace', p: 'a' }, { t: 'act', skill: 'serve', res: 'error', p: 'a' }] };
   const csv = statsCsv([m]);

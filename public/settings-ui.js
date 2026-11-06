@@ -3,7 +3,7 @@
 // Состояние (ui) общее с экраном, который подключил модуль: на главной матча нет (ui.match, ui.st = null) —
 // всё, что зависит от открытого матча («Из матча» и т. п.), тогда просто скрыто.
 import { formatOptions, formatKey, pickFormat } from './engine.js';
-import { ZONE_SPOT, SYSTEMS, ROLES, roleOf, zoneOfSlot } from './court.js';
+import { ZONE_SPOT, SYSTEMS, ROLES, roleOf, zoneOfSlot, rotOrder, rotName } from './court.js';
 import { zonesOf, defaultZones, GRADES, COLS, ROWS, CELL } from './quality.js';
 import { SITUATIONS, tableFor, defaultSpot, defenseLayout, overlapIssues, frontByRole } from './formations.js';
 
@@ -175,11 +175,12 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
 
   // ---------- Редактор расстановок ----------
   // Как команда стоит в каждой из шести расстановок: на приёме, на своей подаче и в защите.
-  // Позиции задаются для зоны (в Рn связующий в зоне n), поэтому подходят к любому составу.
-  // Расстановки связаны: Р1 → Р6 → Р5 → Р4 → Р3 → Р2 — порядок переходов (игроки идут по часовой стрелке).
+  // Внутри r — зона связующего (показываем как Р1…Р6 по ходу игры), поэтому позиции подходят к любому составу.
+  // Расстановки связаны: зона связующего идёт 1 → 6 → 5 → 4 → 3 → 2 (игроки ходят по часовой стрелке).
   const GAME_ORDER = [1, 6, 5, 4, 3, 2];
   const prevRot = r => GAME_ORDER[(GAME_ORDER.indexOf(r) + 5) % 6];
   const nextRot = r => GAME_ORDER[(GAME_ORDER.indexOf(r) + 1) % 6];
+  const rotLabel = r => rotName(r, ui.settings.rotStart);
   // Игроки по слотам (порядок подачи): номера — из стартового состава последней партии, если она есть.
   function refSlots() {
     const pl = ui.fEdit ? editPreset()?.lineup : curPreset().lineup;
@@ -188,7 +189,7 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
     const set = ui.st?.sets.at(-1);
     return set && set.mainSlot >= 0 ? { start: set.start, ms: set.mainSlot } : { start: null, ms: 0 };
   }
-  // В какой зоне слот s в расстановке r (в Рr связующий — в зоне r).
+  // В какой зоне слот s в расстановке r (r — зона связующего).
   function slotZone(s, r, ms) {
     const z1 = [0, 1, 2, 3, 4, 5].find(k => zoneOfSlot(ms, k) === r);
     return zoneOfSlot(s, z1);
@@ -202,7 +203,7 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
   function openFormEditor() {
     const works = presets().map(presetWork);
     const cur = curPreset().id;
-    ui.fEdit = { kind: 'rec', rot: ui.st?.rally?.rot ?? 1, works, presetId: cur };
+    ui.fEdit = { kind: 'rec', rot: ui.st?.rally?.rot ?? rotOrder(ui.settings.rotStart)[0], works, presetId: cur };
     bindPreset();
     paintFormEditor();
   }
@@ -229,7 +230,7 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
       return `<label class="rz"><span>зона ${z}${sl === ms ? ' · связующий' : ''}</span>
         <select data-k="fSlot" data-slot="${sl}">${roster.map(p => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>${p.num ? '#' + esc(p.num) + ' ' : ''}${esc(p.name)}${ROLES[roleOf(p)] ? ' · ' + ROLES[roleOf(p)].short : ''}</option>`).join('')}</select></label>`;
     };
-    return `<div class="rpanel"><p class="muted" style="margin:0 0 8px"><span class="tip-inline">Кто где стоит в Р${f.rot}. Задайте один раз — в остальных переходах игроки встанут по кругу.</span>
+    return `<div class="rpanel"><p class="muted" style="margin:0 0 8px"><span class="tip-inline">Кто где стоит в ${rotLabel(f.rot)}. Задайте один раз — в остальных переходах игроки встанут по кругу.</span>
         Связующий (по нему считаются Р1–Р6): <select data-k="fMain">${lu.start.filter(Boolean).map(id => { const p = roster.find(x => x.id === id); return `<option value="${id}" ${id === lu.main ? 'selected' : ''}>${p?.num ? '#' + esc(p.num) + ' ' : ''}${esc(p?.name)}</option>`; }).join('')}</select></p>
       <div class="rgrid">${[4, 3, 2, 5, 6, 1].map(cell).join('')}</div></div>`;
   }
@@ -302,16 +303,16 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
       </div>
       ${f.showRoster ? rosterPanel(f) : ''}
       <p>Перетащите игроков: как команда стоит в каждой расстановке (игровые позиции; «зона N» на фишке — где игрок по протоколу).
-        В <b>Р${f.rot}</b> связующий — в зоне ${f.rot}. В защите задайте базовую расстановку — под блок слева / по центру / справа команда
+        В <b>${rotLabel(f.rot)}</b> связующий — в зоне ${f.rot}. В защите задайте базовую расстановку — под блок слева / по центру / справа команда
         перестроится сама: кто левее, центральнее и правее в передней и задней линии, тот и займёт своё место.</p>
       <div class="fbar"><div class="seg">${Object.entries(SITUATIONS).map(([k, v]) => `<button class="${f.kind === k ? 'on' : ''}" data-a="fKind" data-v="${k}">${v}</button>`).join('')}</div>
         ${f.kind === 'def' ? `<div class="seg" title="Как команда встанет, когда поставите блок у сетки">${[['base', 'Базовая'], ['left', 'Блок слева'], ['center', 'По центру'], ['right', 'Справа']].map(([k, v]) => `<button class="${view === k ? 'on' : ''}" data-a="fDefView" data-v="${k}">${v}</button>`).join('')}</div>` : ''}
-        <div class="seg" title="В порядке переходов: игроки идут по часовой стрелке, номер расстановки — против">
-          <button data-a="fStep" data-d="-1" title="Предыдущий переход">◀</button>${GAME_ORDER.map(r => `<button class="${f.rot === r ? 'on' : ''} ${isTouched(f, f.kind, r) ? 'done' : ''}" data-a="fRot" data-v="${r}">Р${r}</button>`).join('')}<button data-a="fStep" data-d="1" title="Следующий переход">▶</button></div></div>
+        <div class="seg" title="В порядке переходов: Р1 — стартовая расстановка, игроки идут по часовой стрелке">
+          <button data-a="fStep" data-d="-1" title="Предыдущий переход">◀</button>${rotOrder(ui.settings.rotStart).map(r => `<button class="${f.rot === r ? 'on' : ''} ${isTouched(f, f.kind, r) ? 'done' : ''}" data-a="fRot" data-v="${r}">${rotLabel(r)}</button>`).join('')}<button data-a="fStep" data-d="1" title="Следующий переход">▶</button></div></div>
       ${view === 'base' && f.kind === 'serve' ? '<div class="banner" style="margin:0 0 8px">На своей подаче игроки стоят свободно — правила расстановки действуют только для принимающей команды.</div>' : ''}
       ${view === 'base' && f.kind === 'rec' && !strict ? '<div class="banner" style="margin:0 0 8px">Свободный режим: правила расстановки не проверяются.</div>' : ''}
       ${legal ? (legal.issues.length ? `<div class="banner bad" style="margin:0 0 8px">Нарушение расстановки при подаче: ${legal.issues.join('; ')}</div>` : `<div class="banner ok" style="margin:0 0 8px">Расстановка по правилам: линии не пересекаются до удара по мячу.</div>`) : ''}
-      ${inh ? `<div class="banner" style="margin:0 0 8px">Р${f.rot} ещё не настроена — игроки сдвинуты на один переход из Р${prevRot(f.rot)}. Поправьте места — и она запомнится.</div>` : ''}
+      ${inh ? `<div class="banner" style="margin:0 0 8px">${rotLabel(f.rot)} ещё не настроена — игроки сдвинуты на один переход из ${rotLabel(prevRot(f.rot))}. Поправьте места — и она запомнится.</div>` : ''}
       <div class="zwrap"><svg id="fsvg" viewBox="-1.6 -1.1 12.2 13.4">
         <rect x="0" y="0" width="9" height="9" fill="#1d3a57"/>
         <rect x="0" y="0" width="9" height="3" fill="rgb(255 255 255 / .04)"/>
@@ -327,10 +328,10 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
         <button class="btn sm ghost" data-a="fFrontAll" title="То же во всех Р1–Р6 этой ситуации">…во всех Р</button>
         <span class="grow"></span>
         Скопировать из <select data-k="fSrcKind">${Object.entries(SITUATIONS).map(([k, v]) => `<option value="${k}" ${(f.srcKind ?? f.kind) === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
-        <select data-k="fSrcRot">${GAME_ORDER.map(r => `<option value="${r}" ${(f.srcRot ?? f.rot) === r ? 'selected' : ''}>Р${r}</option>`).join('')}</select>
+        <select data-k="fSrcRot">${rotOrder(ui.settings.rotStart).map(r => `<option value="${r}" ${(f.srcRot ?? f.rot) === r ? 'selected' : ''}>${rotLabel(r)}</option>`).join('')}</select>
         <button class="btn sm" data-a="fCopyFrom">Копировать</button>
       </div>
-      <div class="foot"><button class="btn ghost" data-a="fProto" title="Все — ровно в свои зоны по протоколу; от этого удобно расставлять">Протокольная</button><button class="btn ghost" data-a="fReset">Сбросить Р${f.rot}</button><button class="btn ghost" data-a="fCopy">Копировать во все Р1–Р6</button><span class="grow"></span>
+      <div class="foot"><button class="btn ghost" data-a="fProto" title="Все — ровно в свои зоны по протоколу; от этого удобно расставлять">Протокольная</button><button class="btn ghost" data-a="fReset">Сбросить ${rotLabel(f.rot)}</button><button class="btn ghost" data-a="fCopy">Копировать во все Р1–Р6</button><span class="grow"></span>
         <button class="btn ghost" data-a="modalClose">Отмена</button><button class="btn primary" data-a="fSave">Сохранить</button></div>`);
     const svg = $('fsvg');
     let drag = null;
@@ -463,6 +464,7 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
       <div class="card teamcard" style="margin-bottom:10px">${ourEmblem('lg')}<span class="grow"><b>${esc(ui.settings.teamName)}</b><small>в составе ${act} · в запасе ${ui.roster.length - act} · соперников ${ui.settings.opponents.length}</small></span></div>
       ${optRow('Игроки, форма, соперники', 'Номера, имена, роли; цвета майки и шортов; эмблемы.', '<button class="btn sm" data-a="teamModal">Изменить</button>')}
       ${optRow('Расстановки', 'Как команда стоит на приёме, на своей подаче и в защите — для каждой из Р1–Р6.', '<button class="btn sm" data-a="formEditor">Настроить</button>')}
+      ${optRow('Стартовая расстановка', `Р1 — связующий начинает в зоне ${rotOrder(ui.settings.rotStart)[0]}. Дальше номера идут по ходу игры. Позиции и матчи от этого не меняются.`, segCtl('rotStart', rotOrder(ui.settings.rotStart)[0], [1, 2, 3, 4, 5, 6].map(z => [z, 'зона ' + z])))}
       ${optRow('Зоны доводки', 'Оценка приёма и защиты ++ / + / − по точке, куда мяч пришёл к пасующему.', '<button class="btn sm" data-a="zonesEditor">Настроить</button>')}`;
     }
     return `<h3 class="mh">Данные</h3>${dataBody()}`;
@@ -476,6 +478,7 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
   // Применить настройку вида (кнопки-сегменты в окне настроек).
   // В студии настройка сразу применяется (studio.opt); на главной — только запоминается (те же ключи studio.*).
   function applyOpt(k, v) {
+    if (k === 'rotStart') return call(async () => { ui.settings = await api('PUT', '/api/settings', { rotStart: +v }); await onChanged(); paintSettings(); });
     if (k === 'detail') { store.set('detail', v); court?.setDetail(v); }
     else if (k === 'labelMode') { store.set('labelMode', v); court?.setLabelMode(v); }
     else if (k === 'view3d') store.set('view3d', v);
@@ -623,7 +626,7 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
       if (sk === f.kind && sr === f.rot) return toast('Выберите другую ситуацию или расстановку');
       f.data[f.kind][f.rot] = JSON.parse(JSON.stringify(f.data[sk][sr]));
       (f.touched[f.kind] ??= {})[f.rot] = true;
-      toast(`Скопировано из «${SITUATIONS[sk]}» Р${sr} — поправьте, что отличается`); paintFormEditor();
+      toast(`Скопировано из «${SITUATIONS[sk]}» ${rotLabel(sr)} — поправьте, что отличается`); paintFormEditor();
     },
     fProto: () => {
       const f = ui.fEdit;
@@ -662,7 +665,7 @@ export function createSettings({ ui, toast: say = toast, onChanged = () => {}, o
     },
     fCopy: () => {
       const f = ui.fEdit, src = f.data[f.kind][f.rot];
-      if (!confirm(`Поставить «${SITUATIONS[f.kind]}» во всех расстановках как в Р${f.rot}? Позиции считаются по зонам.`)) return;
+      if (!confirm(`Поставить «${SITUATIONS[f.kind]}» во всех расстановках как в ${rotLabel(f.rot)}? Позиции считаются по зонам.`)) return;
       for (let r = 1; r <= 6; r++) { f.data[f.kind][r] = JSON.parse(JSON.stringify(src)); (f.touched[f.kind] ??= {})[r] = true; }
       paintFormEditor();
     },
