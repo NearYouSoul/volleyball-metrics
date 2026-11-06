@@ -28,6 +28,7 @@
       <symbol id="i-top" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 12h12M6 9h12M6 15h12" stroke="currentColor" stroke-width="1" opacity=".6"/></symbol>
       <symbol id="i-side" viewBox="0 0 24 24"><path d="M2 18h20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 18V9" stroke="currentColor" stroke-width="1.8"/><path d="M12 9h0" stroke="currentColor"/><path d="M5 14c2-6 5-8 7-8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 2"/></symbol>
       <symbol id="i-eye" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3" fill="currentColor"/></symbol>
+      <symbol id="i-last" viewBox="0 0 24 24"><path fill="currentColor" d="M5 6.2v11.6a.8.8 0 0 0 1.25.66L14 13.2a1 1 0 0 0 0-1.6L6.25 6.34A.8.8 0 0 0 5 6.2Z"/><rect x="16" y="5" width="3" height="14" rx="1" fill="currentColor"/></symbol>
       <symbol id="i-left" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 5l-7 7 7 7"/></symbol>
       <symbol id="i-dots" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="6" cy="7" r="2"/><circle cx="16" cy="5.5" r="2"/><circle cx="11" cy="12.5" r="2"/><circle cx="18.5" cy="14" r="2"/><circle cx="6.5" cy="18" r="2"/><circle cx="14.5" cy="19" r="2"/></g></symbol>
       <symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 14l5-5 5 5"/></symbol>
@@ -125,6 +126,7 @@
         <div class="zoomctl" id="zoomCtl" title="Зум видео: колесо мыши над видео, перетаскивание — сдвиг, двойной клик — сброс">
           <button class="ibtn" data-a="vzoom" data-d="-1">−</button><span id="zoomVal">100%</span><button class="ibtn" data-a="vzoom" data-d="1">+</button>
         </div>
+        <button class="ibtn lastbtn" id="lastBtn" data-a="toLast" title="К последней точке (End): 3D на текущий шаг ввода, видео — не раньше последней отметки"><svg><use href="#i-last"/></svg></button>
         <button class="sync-btn" id="syncBtn" data-a="sync" title="Синхронизация с видео (L): Пробел — стоп-кадр на касании, после шага видео идёт дальше, петля страхует">⟲ Синхр.</button>
         <div class="seg" id="loopSeg" title="Длина петли синхронизации"><button data-a="loopLen" data-v="3">3с</button><button data-a="loopLen" data-v="5">5с</button><button data-a="loopLen" data-v="8">8с</button></div>
         <label class="toggle" title="Пауза, пока вводите касание; после конца розыгрыша видео продолжится само"><input type="checkbox" id="autoPause" checked><span>Пауза<span class="long"> при вводе</span></span></label>

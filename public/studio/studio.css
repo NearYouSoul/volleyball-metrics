@@ -96,6 +96,7 @@ input[type=range] { accent-color: var(--mint); width: 100%; }
 .navback { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 30px; padding: 0 10px 0 6px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--text); background: var(--raise); box-shadow: var(--key); text-decoration: none; }
 .navback svg { width: 16px; height: 16px; }
 .navback:hover { box-shadow: var(--key-hi); }
+.lastbtn.hot { color: #1a1406; background: var(--amber); } /* смотрим прошлое: кнопка зовёт вернуться к вводу */
 .brandmark { width: 28px; height: 28px; border-radius: 7px; flex: none; }
 .bname { display: flex; flex-direction: column; line-height: 1.1; white-space: nowrap; }
 @media (max-width: 1600px) { .topbar .bname { display: none; } .topbar .brand { padding-right: 0; } }

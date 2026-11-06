@@ -93,7 +93,9 @@ function mainGroup() {
   if (r.phase === 'rec') return 'rec';
   if (r.phase === 'their') return 'def';
   const last = rallyPlays().filter(p => !p.virtual).at(-1);
-  return ui.trackSets && last?.skill !== 'set' ? 'set' : 'att';
+  // Мяч только пришёл к нам: первое касание — приём или защита, атаку при необходимости выбирают вручную.
+  if (!last || last.skill === 'team' || last.skill === 'blk' || CROSS.has(`${last.skill}.${last.res}`)) return 'def';
+  return ui.trackSets && last.skill !== 'set' ? 'set' : 'att';
 }
 const group = () => ui.group || mainGroup();
 
@@ -149,6 +151,7 @@ function queue(fn) {
 function postEvent(ev) {
   // Ввод продолжается — выбранное в истории (розыгрыш, событие) больше не на площадке.
   ui.focusRally = null; ui.pickedRally = false; ui.edit = null; ui.editPoints = false;
+  ui.group = null; // следующий шаг — по фазе, вручную открытая вкладка не залипает
   const at = ui.insertAt, id = ui.match.id, before = rallyKey();
   if (at === null) ui.match.events.push(ev); else { ui.match.events.splice(at, 0, ev); ui.insertAt = at + 1; }
   recompute();
@@ -249,7 +252,7 @@ const court = createCourt3D($('court3d'), {
     // Пока мяч у соперника, сетка важнее игроков у сетки: мышь на сетке — предпросмотр блока и перестроения.
     const their = ctx()?.stage === 'their';
     const fixed = !!ui.draft?.block;
-    const netX = their && !(fixed && hit?.hands) ? (hit?.net?.x ?? (inNetBand(p) ? p.x : null)) : null;
+    const netX = their && !(fixed && (hit?.hands || hit?.player)) ? (hit?.net?.x ?? (inNetBand(p) ? p.x : null)) : null;
     const hp = netX != null ? null : hit?.player ?? null;
     const bh = their && !ui.draft?.block && netX != null ? { x: +Math.max(0, Math.min(9, netX)).toFixed(1) } : null;
     if (JSON.stringify(bh) !== JSON.stringify(ui.blockHover)) { ui.blockHover = bh; ui.cand = undefined; }
@@ -482,6 +485,13 @@ function confirmPlayer(a, id) {
   render();
 }
 
+// Блок — заметный момент на видео: запоминаем его кадр, в синхронизации петля дальше идёт от него.
+function placeBlock(x) {
+  const t = curT();
+  ui.draft = { ...ui.draft, block: { x, side: blockSide(x), t } }; ui.blockHover = null;
+  syncStep(t);
+  render();
+}
 function onCourtPick(p, e, hit) {
   if (!ui.match) return;
   closeMenu();
@@ -495,11 +505,7 @@ function onCourtPick(p, e, hit) {
   pauseForInput();
   const right = e.button === 2;
   // Мяч у соперника: клик по сетке ставит (переставляет) наш блок — раньше, чем клик по игроку у сетки.
-  if (c.stage === 'their' && !(ui.draft?.block && hit?.hands) && (hit?.net || inNetBand(p))) {
-    const x = Math.max(0, Math.min(9, hit?.net?.x ?? p.x));
-    ui.draft = { ...ui.draft, block: { x, side: blockSide(x) } }; ui.blockHover = null;
-    return render();
-  }
+  if (c.stage === 'their' && !(ui.draft?.block && (hit?.hands || hit?.player)) && (hit?.net || inNetBand(p))) return placeBlock(Math.max(0, Math.min(9, hit?.net?.x ?? p.x)));
   const id = hit?.hands ? null : hit?.player;
 
   if (c.stage === 'await') {
@@ -540,7 +546,7 @@ function stepPoint(c, p, right, hit) {
     case 'their': {
       if (hit?.hands === 'us') return ourBlockMenu(p);
       // Клик по сетке — поставить наш блок (по центру — один, у краёв — двое); команда перестроится.
-      if (c.stage === 'their' && inNetBand(p)) { ui.draft = { ...ui.draft, block: { x: p.x, side: blockSide(p.x) } }; ui.blockHover = null; render(); return; }
+      if (c.stage === 'their' && inNetBand(p)) return placeBlock(p.x);
       if (p.y >= NET) { if (c.stage === 'their') { ui.draft = { ...ui.draft, origin: p }; render(); } return; }
       if (!inCourtUs(p)) return postAct({ skill: 'team', res: 'oppError', p: null, to: p });
       const lost = { skill: 'team', res: c.stage === 'rec' ? 'oppAce' : 'oppKill', p: null, to: p, ...(c.origin && { from: c.origin }) };
@@ -642,11 +648,11 @@ function ourBlockMenu(p) {
   const bl = ourBlockers();
   const blocker = bl.length ? bl.reduce((a, b) => (Math.abs(b.x - p.x) < Math.abs(a.x - p.x) ? b : a)).id : nearest({ x: p.x, y: NET - 0.5 }, { only: frontRow() });
   const at = { x: p.x, y: NET - 0.1 };
-  const from = ui.draft?.origin;
+  const from = ui.draft?.origin, vt = ui.draft?.block?.t;
   openMenu(at, 2.9, [
-    ['Блок: очко', 'g', () => postAct({ skill: 'blk', res: 'point', p: blocker, to: at, ...(from && { from }) })],
-    ['Касание — мяч у нас', 'y', () => { const block = ui.draft?.block; postAct({ skill: 'blk', res: 'touch', p: blocker, to: at, ...(from && { from }) }); ui.draft = { origin: from, block }; render(); }],
-    ['Блок-аут — очко им', 'r', () => postAct({ skill: 'blk', res: 'out', p: blocker, to: at, ...(from && { from }) })],
+    ['Блок: очко', 'g', () => postAct({ skill: 'blk', res: 'point', p: blocker, to: at, ...(from && { from }), ...(vt != null && { vt }) })],
+    ['Касание — мяч у нас', 'y', () => { const block = ui.draft?.block; postAct({ skill: 'blk', res: 'touch', p: blocker, to: at, ...(from && { from }), ...(vt != null && { vt }) }); ui.draft = { origin: from, block }; render(); }],
+    ['Блок-аут — очко им', 'r', () => postAct({ skill: 'blk', res: 'out', p: blocker, to: at, ...(from && { from }), ...(vt != null && { vt }) })],
   ], `Наш блок: ${esc(name(blocker))}`);
 }
 
@@ -908,6 +914,7 @@ function paintPlayers() {
 
 function paintCourt() {
   settleRally();
+  paintLastBtn();
   const c = ctx();
   paintPlayers();
   const edit = ui.editPoints && ui.edit !== null ? ui.match.events[ui.edit] : null;
@@ -1379,6 +1386,7 @@ function openHelp() {
       ${k(['L'], 'синхронизация с видео: пробел — стоп-кадр на касании, петля страхует')}
       ${k(['Tab'], 'быстро к следующей подаче (×3), пробел — стоп')}
       ${k(['PgUp', 'PgDn'], 'предыдущий / следующий розыгрыш (видео и 3D)')}
+      ${k(['End'], 'к последней точке: 3D и видео возвращаются к вводу')}
       ${k([',', '.'], 'кадр назад / вперёд')}
       ${k(['[', ']'], 'скорость видео: медленнее / быстрее')}
       ${k(['1', '…', '6'], 'выбрать игрока по номеру зоны')}
@@ -1575,6 +1583,16 @@ function sideRallies() {
   return html || '<p class="muted">Розыгрышей пока нет.</p>';
 }
 
+// Кадр последнего введённого касания на открытом видео.
+const inputEdge = () => rallies().findLast(r => r.v === ui.activeVideo && r.t1 != null)?.t1 ?? null;
+// Вернуться к вводу: 3D — на текущий шаг (подающий на подаче), видео — не раньше последней отмеченной точки.
+function toLast() {
+  ui.focusRally = null; ui.pickedRally = false; ui.edit = null; ui.editPoints = false; ui.playlist = null;
+  const edge = ui.match && video.src ? inputEdge() : null;
+  if (edge != null && video.currentTime < edge) { video.pause(); seekTo(edge); }
+  render();
+}
+const paintLastBtn = () => $('lastBtn').classList.toggle('hot', !!ui.focusRally || ui.edit !== null);
 // Какой розыгрыш смотрим из истории: выбранный в списке или тот, чьё событие выделено.
 function reviewRally() {
   if (!ui.match) return null;
@@ -1588,10 +1606,7 @@ function rallyAtTime(t) {
   if (picked && hit(picked)) return picked;
   // Край ввода: от кадра последнего введённого розыгрыша и дальше площадка принадлежит вводу, а не повтору.
   // Берём последний по порядку ввода, а не по времени: вводить могли и с перемотанного назад видео.
-  if (live()) {
-    const edge = rallies().findLast(r => r.v === ui.activeVideo && r.t1 != null)?.t1 ?? 0;
-    if (ui.insertAt !== null || t >= edge) return null;
-  }
+  if (live() && (ui.insertAt !== null || t >= (inputEdge() ?? 0))) return null;
   return rallies().find(hit);
 }
 function stateAt(r) {
@@ -1683,10 +1698,15 @@ function replayTick() {
   if (!ui.match || !video.src || ui.draft || (ui.sync && (ui.anchor != null || !ui.pickedRally))) return endReplay();
   const t = video.currentTime;
   const r = rallyAtTime(t);
-  if (!r) return endReplay();
+  if (!r) {
+    // Досмотрели выбранный последний розыгрыш и ушли дальше по видео — площадка возвращается к вводу.
+    const p = ui.pickedRally ? rallyByKey(ui.focusRally) : null;
+    if (p?.t1 != null && p.v === ui.activeVideo && live() && t > p.t1 + 2.5 && t >= (inputEdge() ?? 0)) { ui.pickedRally = false; ui.focusRally = null; if (!replayKey) render(); }
+    return endReplay();
+  }
   if (replayKey !== r.key) {
     replayKey = r.key;
-    if (ui.focusRally !== r.key) { ui.focusRally = r.key; ui.pickedRally = false; if (ui.tab === 'events') paintSide(); }
+    if (ui.focusRally !== r.key) { ui.focusRally = r.key; ui.pickedRally = false; paintLastBtn(); if (ui.tab === 'events') paintSide(); }
     court.setTrails(trailsFor(r.plays), { animate: false });
     court.setPreview([]); court.setHands([]);
   }
@@ -1968,6 +1988,7 @@ const H = {
     paintSyncHud();
   },
   sync: () => setSync(!ui.sync),
+  toLast,
   loopLen: d => { ui.loopLen = +d.v; store.set('loopLen', ui.loopLen); paintSyncUi(); },
   seek: d => seekTo(video.currentTime + Number(d.d)),
   frame: d => { video.pause(); seekTo(video.currentTime + Number(d.d) / 25); },
@@ -2168,6 +2189,7 @@ document.addEventListener('keydown', e => {
   if (c === 'Tab' && video.src) { e.preventDefault(); toggleFF(); return; }
   if (c === 'PageUp' || c === 'PageDown') { e.preventDefault(); stepRally(c === 'PageUp' ? -1 : 1); return; }
   if (c === 'KeyL' && !e.shiftKey) { setSync(!ui.sync); return; }
+  if (c === 'End') { e.preventDefault(); toLast(); return; }
   if (c === 'ArrowLeft' || c === 'ArrowRight') { e.preventDefault(); seekTo(video.currentTime + (c === 'ArrowLeft' ? -1 : 1) * ui.seekStep * (e.shiftKey ? 3 : 1)); return; }
   if (c === 'Comma' || c === 'Period') { H.frame({ d: c === 'Comma' ? -1 : 1 }); return; }
   // Esc: сначала меню, потом незаконченный шаг, потом выбор/правка.
