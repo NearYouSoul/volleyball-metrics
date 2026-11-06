@@ -519,8 +519,14 @@ function onCourtPick(p, e, hit) {
     // Клик сразу по игроку: точка и игрок одним кликом.
     if (['rec', 'their', 'free'].includes(c.stage)) return confirmPlayer({ kind: 'touch', t: curT(), point: posOf(id), touchKind: c.stage === 'rec' ? 'rec' : 'dig', from: c.origin ?? null, prev: ui.draft }, id);
     if (c.stage === 'touch2') { const at = posOf(id); return confirmPlayer({ kind: 'setter', t: curT(), point: at, touch: c.touch, res: gradeFor(c.touch, at), prev: null }, id); }
-    if (c.stage === 'set') { if (id === c.p) return; const at = { x: posOf(id).x, y: Math.max(6.6, posOf(id).y + 1.6) }; return confirmPlayer({ kind: 'attacker', t: curT(), point: at, set: c, prev: null }, id); }
-    if (c.stage === 'att') { ui.draft = { att: { p: id, from: c.from } }; moveTo(id, c.from); return render(); }
+    if (c.stage === 'set') {
+      if (id === c.p) return;
+      const at = { x: posOf(id).x, y: Math.max(6.6, posOf(id).y + 1.6) };
+      // В синхронизации это точка, куда прилетел мяч: видео стоит на ней, пока игрока не подтвердят.
+      if (ui.sync && video.src) return awaitPlayer('attacker', at, id, { set: c });
+      return confirmPlayer({ kind: 'attacker', t: curT(), point: at, set: c, prev: null }, id);
+    }
+    if (c.stage === 'att') { ui.draft = { att: { p: id, from: c.from, t: c.t } }; moveTo(id, c.from); syncStep(c.t ?? curT()); return render(); }
     return;
   }
   stepPoint(c, p, right, hit);
@@ -547,7 +553,7 @@ function stepPoint(c, p, right, hit) {
       if (hit?.hands === 'us') return ourBlockMenu(p);
       // Клик по сетке — поставить наш блок (по центру — один, у краёв — двое); команда перестроится.
       if (c.stage === 'their' && inNetBand(p)) return placeBlock(p.x);
-      if (p.y >= NET) { if (c.stage === 'their') { ui.draft = { ...ui.draft, origin: p }; render(); } return; }
+      if (p.y >= NET) { if (c.stage === 'their') { ui.draft = { ...ui.draft, origin: p }; syncStep(curT()); render(); } return; }
       if (!inCourtUs(p)) return postAct({ skill: 'team', res: 'oppError', p: null, to: p });
       const lost = { skill: 'team', res: c.stage === 'rec' ? 'oppAce' : 'oppKill', p: null, to: p, ...(c.origin && { from: c.origin }) };
       if (right) return postAct(lost);
