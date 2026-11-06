@@ -1,6 +1,10 @@
 # Ставится командой npm install
 node_modules/
 
+# Переносной Node.js: его скачивает scripts/need-node.bat
+runtime/
+runtime-tmp/
+
 # Личные данные: состав, соперники, матчи. Живут только на компьютере, в репозиторий не попадают.
 data/
 demo-data/
